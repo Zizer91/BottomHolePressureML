@@ -29,7 +29,7 @@
 
 **Описание проекта**
 
-Jupyter Notebook (notebooks/bhp_prediction.ipynb) выполняет следующие шаги:
+Jupyter Notebook (notebooks/BHP_ML.ipynb) выполняет следующие шаги:
 - Загрузка и предобработка данных: Удаление пропусков, фильтрация выбросов по IQR, преобразование типов данных.
 - Обучение базовых моделей: RandomForest, GradientBoosting, DecisionTree.
 - Анализ важности признаков: Построение тепловой карты с помощью seaborn.
