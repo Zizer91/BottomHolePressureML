@@ -19,4 +19,12 @@ python train.py
 uvicorn api.app:app --reload
 ```
 
-#### Запуск через Docker
+### Запуск через Docker
+docker-compose up --build
+API будет доступен: http://localhost:8000
+
+### 📡 API Endpoints
+|Метод | Эндпоинт | Описание |
+|-------------|-------------|-------------|
+| GET    | /health    | Проверка статуса сервиса    |
+| GET    | /docs    | Данные C    |
