@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  bhp-api:
+    build: .
+    ports:
+      - "8000:8000"
+    # Монтируем папку с моделью, если она есть локально (но в Docker-образе она уже будет)
+    # Это полезно для разработки, чтобы не пересобирать образ.
+    # volumes:
+    #   - ./models:/app/models
+    restart: unless-stopped
