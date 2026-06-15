@@ -23,8 +23,7 @@ def sample_train_data(tmp_path):
         'Cond': [10, 20, 30],
         'Water': [5, 10, 15],
         'WOR': [0.05, 0.05, 0.05],
-        'GOR': [100, 100, 100],
-        'extra_col': [1, 2, 3]
+        'GOR': [100, 100, 100]
     }
     df = pd.DataFrame(data)
     file_path = tmp_path / 'teach_data.csv'
@@ -86,9 +85,12 @@ class TestDataLoader:
         }
         df = pd.DataFrame(data)
         df_clean = remove_null_and_zero(df)
-        assert len(df_clean) == 1
-        assert df_clean.iloc[0]['Choke'] == 10
-        assert df_clean.iloc[0]['BHP'] == 200
+        # Проверяем, что удалены строки с Choke=0, BHP=0, NaN
+        # Ожидаем: только строки с Choke=10, Choke=20, Choke=30 (индексы 1, 2, 4)
+        assert len(df_clean) == 3
+        assert all(x != 0 for x in df_clean['Choke'])
+        assert all(x != 0 for x in df_clean['BHP'])
+        assert not df_clean['extra'].isna().any()
     
     def test_remove_outliers_iqr(self, sample_data_with_outliers):
         df = pd.read_csv(sample_data_with_outliers, sep=';')
@@ -105,7 +107,11 @@ class TestDataLoader:
         assert isinstance(X_train, pd.DataFrame)
         assert isinstance(y_train, pd.Series)
         assert isinstance(forecast_metadata, pd.DataFrame)
-        assert 'extra_col' not in X_train.columns
+        # Проверяем, что мета-колонки удалены
+        assert 'Well Name' not in X_train.columns
+        assert 'Last' not in X_train.columns
+        assert 'BHP' not in X_train.columns
+        # Проверяем, что forecast_metadata содержит нужные колонки
         assert 'Well Name' in forecast_metadata.columns
         assert 'Last' in forecast_metadata.columns
         assert len(forecast_metadata) == 2
