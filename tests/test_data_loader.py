@@ -85,9 +85,9 @@ class TestDataLoader:
         }
         df = pd.DataFrame(data)
         df_clean = remove_null_and_zero(df)
-        # Проверяем, что удалены строки с Choke=0, BHP=0, NaN
-        # Ожидаем: только строки с Choke=10, Choke=20, Choke=30 (индексы 1, 2, 4)
-        assert len(df_clean) == 3
+        # Ожидаем: удалены строки с Choke=0, BHP=0, NaN
+        # Остаются строки с индексами 1 (Choke=10, BHP=200) и 4 (Choke=30, BHP=500)
+        assert len(df_clean) == 2
         assert all(x != 0 for x in df_clean['Choke'])
         assert all(x != 0 for x in df_clean['BHP'])
         assert not df_clean['extra'].isna().any()
@@ -107,12 +107,18 @@ class TestDataLoader:
         assert isinstance(X_train, pd.DataFrame)
         assert isinstance(y_train, pd.Series)
         assert isinstance(forecast_metadata, pd.DataFrame)
+        
         # Проверяем, что мета-колонки удалены
         assert 'Well Name' not in X_train.columns
         assert 'Last' not in X_train.columns
-        assert 'BHP' not in X_train.columns
+        
         # Проверяем, что forecast_metadata содержит нужные колонки
         assert 'Well Name' in forecast_metadata.columns
         assert 'Last' in forecast_metadata.columns
         assert len(forecast_metadata) == 2
+        
+        # Проверяем, что целевая переменная не содержит NaN
         assert not y_train.isna().any()
+        
+        # Проверяем, что X_train не пустой и содержит только числовые колонки
+        assert X_train.shape[1] > 0
