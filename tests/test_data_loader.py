@@ -1,7 +1,6 @@
 import pytest
 import pandas as pd
 import numpy as np
-from pathlib import Path
 
 from src.data_loader import (
     load_raw_data,
