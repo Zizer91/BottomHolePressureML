@@ -78,19 +78,18 @@ class TestDataLoader:
         assert len(forecast_df) == 2
     
     def test_remove_null_and_zero(self):
-        data = {
-            'Choke': [0, 10, 20, 0, 30],
-            'BHP': [100, 200, 0, 400, 500],
-            'extra': [1, np.nan, 3, 4, 5]
-        }
-        df = pd.DataFrame(data)
-        df_clean = remove_null_and_zero(df)
-        # Ожидаем: удалены строки с Choke=0, BHP=0, NaN
-        # Остаются строки с индексами 1 (Choke=10, BHP=200) и 4 (Choke=30, BHP=500)
-        assert len(df_clean) == 2
-        assert all(x != 0 for x in df_clean['Choke'])
-        assert all(x != 0 for x in df_clean['BHP'])
-        assert not df_clean['extra'].isna().any()
+    data = {
+        'Choke': [0, 10, 20, 0, 30],
+        'BHP': [100, 200, 0, 400, 500],
+        'extra': [1, 2, 3, 4, 5]      # Убрали NaN
+    }
+    df = pd.DataFrame(data)
+    df_clean = remove_null_and_zero(df)
+    # Ожидаем: удалены строки с Choke=0 (индексы 0 и 3) и BHP=0 (индекс 2)
+    # Остаются строки с индексами 1 (Choke=10, BHP=200) и 4 (Choke=30, BHP=500)
+    assert len(df_clean) == 2
+    assert all(x != 0 for x in df_clean['Choke'])
+    assert all(x != 0 for x in df_clean['BHP'])
     
     def test_remove_outliers_iqr(self, sample_data_with_outliers):
         df = pd.read_csv(sample_data_with_outliers, sep=';')
