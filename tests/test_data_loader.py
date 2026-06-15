@@ -5,9 +5,14 @@ from pathlib import Path
 import sys
 import os
 
+# ============================================================
 # Добавляем путь к корню проекта (чтобы импортировать src)
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# ============================================================
+# Получаем путь к корню репозитория (на уровень выше tests)
+repo_root = Path(__file__).parent.parent
+sys.path.insert(0, str(repo_root))
 
+# Теперь импорт должен работать
 from src.data_loader import (
     load_raw_data,
     remove_null_and_zero,
