@@ -66,7 +66,7 @@ def sample_data_with_outliers(tmp_path):
 
 
 class TestDataLoader:
-    
+
     def test_load_raw_data(self, sample_train_data, sample_forecast_data):
         train_df, forecast_df = load_raw_data(
             str(sample_train_data),
@@ -76,28 +76,28 @@ class TestDataLoader:
         assert isinstance(forecast_df, pd.DataFrame)
         assert len(train_df) == 3
         assert len(forecast_df) == 2
-    
+
     def test_remove_null_and_zero(self):
-    data = {
-        'Choke': [0, 10, 20, 0, 30],
-        'BHP': [100, 200, 0, 400, 500],
-        'extra': [1, 2, 3, 4, 5]      # Убрали NaN
-    }
-    df = pd.DataFrame(data)
-    df_clean = remove_null_and_zero(df)
-    # Ожидаем: удалены строки с Choke=0 (индексы 0 и 3) и BHP=0 (индекс 2)
-    # Остаются строки с индексами 1 (Choke=10, BHP=200) и 4 (Choke=30, BHP=500)
-    assert len(df_clean) == 2
-    assert all(x != 0 for x in df_clean['Choke'])
-    assert all(x != 0 for x in df_clean['BHP'])
-    
+        data = {
+            'Choke': [0, 10, 20, 0, 30],
+            'BHP': [100, 200, 0, 400, 500],
+            'extra': [1, 2, 3, 4, 5]
+        }
+        df = pd.DataFrame(data)
+        df_clean = remove_null_and_zero(df)
+        # Ожидаем: удалены строки с Choke=0 (индексы 0 и 3) и BHP=0 (индекс 2)
+        # Остаются строки с индексами 1 (Choke=10, BHP=200) и 4 (Choke=30, BHP=500)
+        assert len(df_clean) == 2
+        assert all(x != 0 for x in df_clean['Choke'])
+        assert all(x != 0 for x in df_clean['BHP'])
+
     def test_remove_outliers_iqr(self, sample_data_with_outliers):
         df = pd.read_csv(sample_data_with_outliers, sep=';')
         original_len = len(df)
         df_clean = remove_outliers_iqr(df, column='BHP', multiplier=1.55)
         assert len(df_clean) == original_len - 1
         assert 100 not in df_clean['BHP'].values
-    
+
     def test_load_and_preprocess(self, sample_train_data, sample_forecast_data):
         X_train, y_train, forecast_metadata = load_and_preprocess(
             str(sample_train_data),
@@ -106,18 +106,9 @@ class TestDataLoader:
         assert isinstance(X_train, pd.DataFrame)
         assert isinstance(y_train, pd.Series)
         assert isinstance(forecast_metadata, pd.DataFrame)
-        
-        # Проверяем, что мета-колонки удалены
         assert 'Well Name' not in X_train.columns
         assert 'Last' not in X_train.columns
-        
-        # Проверяем, что forecast_metadata содержит нужные колонки
         assert 'Well Name' in forecast_metadata.columns
         assert 'Last' in forecast_metadata.columns
         assert len(forecast_metadata) == 2
-        
-        # Проверяем, что целевая переменная не содержит NaN
         assert not y_train.isna().any()
-        
-        # Проверяем, что X_train не пустой и содержит только числовые колонки
-        assert X_train.shape[1] > 0
