@@ -9,7 +9,7 @@
 
 ## 📦 Быстрый старт
 
-### Локальный запуск
+### Локальный запуск 
 
 ```bash
 git clone https://github.com/Zizer91/bhp-prediction.git
