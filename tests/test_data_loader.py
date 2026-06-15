@@ -1,7 +1,12 @@
+import sys
+from pathlib import Path
+
+# Добавляем корень проекта в путь поиска модулей
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pytest
 import pandas as pd
 import numpy as np
-from pathlib import Path
 
 from src.data_loader import (
     load_raw_data,
@@ -29,7 +34,7 @@ def sample_train_data(tmp_path):
         'Water': [5, 10, 15],
         'WOR': [0.05, 0.05, 0.05],
         'GOR': [100, 100, 100],
-        'extra_col': [1, 2, 3]  # лишняя колонка, должна удалиться
+        'extra_col': [1, 2, 3]
     }
     df = pd.DataFrame(data)
     file_path = tmp_path / 'teach_data.csv'
@@ -51,7 +56,7 @@ def sample_forecast_data(tmp_path):
         'Water': [8, 12],
         'WOR': [0.06, 0.06],
         'GOR': [110, 110],
-        'BHP': [150, 250]  # BHP в прогнозе должна игнорироваться
+        'BHP': [150, 250]
     }
     df = pd.DataFrame(data)
     file_path = tmp_path / 'forecast_data.csv'
@@ -101,8 +106,6 @@ class TestDataLoader:
         
         df_clean = remove_null_and_zero(df)
         
-        # Проверяем, что удалены строки с Choke=0 и BHP=0 и NaN
-        # Ожидаем: только строка с Choke=10, BHP=200 (индекс 1)
         assert len(df_clean) == 1
         assert df_clean.iloc[0]['Choke'] == 10
         assert df_clean.iloc[0]['BHP'] == 200
@@ -114,7 +117,6 @@ class TestDataLoader:
         
         df_clean = remove_outliers_iqr(df, column='BHP', multiplier=1.55)
         
-        # Выброс 100 должен удалиться
         assert len(df_clean) == original_len - 1
         assert 100 not in df_clean['BHP'].values
     
@@ -125,18 +127,14 @@ class TestDataLoader:
             str(sample_forecast_data)
         )
         
-        # Проверяем, что вернулись правильные типы
         assert isinstance(X_train, pd.DataFrame)
         assert isinstance(y_train, pd.Series)
         assert isinstance(forecast_metadata, pd.DataFrame)
         
-        # Проверяем, что удалилась лишняя колонка 'extra_col'
         assert 'extra_col' not in X_train.columns
         
-        # Проверяем, что мета-информация сохранилась
         assert 'Well Name' in forecast_metadata.columns
         assert 'Last' in forecast_metadata.columns
-        assert len(forecast_metadata) == 2  # 2 скважины в forecast
+        assert len(forecast_metadata) == 2
         
-        # Проверяем, что целевая переменная не содержит NaN
         assert not y_train.isna().any()
