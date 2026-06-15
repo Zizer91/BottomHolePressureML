@@ -1,12 +1,7 @@
-import sys
-from pathlib import Path
-
-# Добавляем корень проекта в путь поиска модулей
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
 from src.data_loader import (
     load_raw_data,
@@ -16,12 +11,8 @@ from src.data_loader import (
 )
 
 
-# ============================================================
-# Фикстуры (тестовые данные)
-# ============================================================
 @pytest.fixture
 def sample_train_data(tmp_path):
-    """Создаёт временный CSV-файл с тренировочными данными."""
     data = {
         'Well Name': ['W1', 'W2', 'W3'],
         'Last': ['01.01.2025', '02.01.2025', '03.01.2025'],
@@ -44,7 +35,6 @@ def sample_train_data(tmp_path):
 
 @pytest.fixture
 def sample_forecast_data(tmp_path):
-    """Создаёт временный CSV-файл с данными для прогноза."""
     data = {
         'Well Name': ['W4', 'W5'],
         'Last': ['04.01.2025', '05.01.2025'],
@@ -66,7 +56,6 @@ def sample_forecast_data(tmp_path):
 
 @pytest.fixture
 def sample_data_with_outliers(tmp_path):
-    """Создаёт данные с выбросами для тестирования remove_outliers_iqr."""
     data = {
         'BHP': [1, 2, 3, 4, 5, 100, 6, 7, 8, 9, 10],
         'Choke': [10] * 11,
@@ -78,63 +67,47 @@ def sample_data_with_outliers(tmp_path):
     return file_path
 
 
-# ============================================================
-# Тесты
-# ============================================================
 class TestDataLoader:
     
     def test_load_raw_data(self, sample_train_data, sample_forecast_data):
-        """Проверяет загрузку сырых данных."""
         train_df, forecast_df = load_raw_data(
             str(sample_train_data),
             str(sample_forecast_data)
         )
-        
         assert isinstance(train_df, pd.DataFrame)
         assert isinstance(forecast_df, pd.DataFrame)
         assert len(train_df) == 3
         assert len(forecast_df) == 2
     
     def test_remove_null_and_zero(self):
-        """Проверяет удаление пропусков и нулей."""
         data = {
             'Choke': [0, 10, 20, 0, 30],
             'BHP': [100, 200, 0, 400, 500],
             'extra': [1, np.nan, 3, 4, 5]
         }
         df = pd.DataFrame(data)
-        
         df_clean = remove_null_and_zero(df)
-        
         assert len(df_clean) == 1
         assert df_clean.iloc[0]['Choke'] == 10
         assert df_clean.iloc[0]['BHP'] == 200
     
     def test_remove_outliers_iqr(self, sample_data_with_outliers):
-        """Проверяет удаление выбросов по IQR."""
         df = pd.read_csv(sample_data_with_outliers, sep=';')
         original_len = len(df)
-        
         df_clean = remove_outliers_iqr(df, column='BHP', multiplier=1.55)
-        
         assert len(df_clean) == original_len - 1
         assert 100 not in df_clean['BHP'].values
     
     def test_load_and_preprocess(self, sample_train_data, sample_forecast_data):
-        """Проверяет полный цикл загрузки и предобработки."""
         X_train, y_train, forecast_metadata = load_and_preprocess(
             str(sample_train_data),
             str(sample_forecast_data)
         )
-        
         assert isinstance(X_train, pd.DataFrame)
         assert isinstance(y_train, pd.Series)
         assert isinstance(forecast_metadata, pd.DataFrame)
-        
         assert 'extra_col' not in X_train.columns
-        
         assert 'Well Name' in forecast_metadata.columns
         assert 'Last' in forecast_metadata.columns
         assert len(forecast_metadata) == 2
-        
         assert not y_train.isna().any()
