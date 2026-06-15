@@ -1,5 +1,7 @@
 # BHP Prediction API
 
+[![CI](https://github.com/Zizer91/BottomHolePressureML/actions/workflows/CI.yml/badge.svg)](https://github.com/Zizer91/BottomHolePressureML/actions/workflows/CI.yml)
+
 Микросервис для прогнозирования забойного давления (BHP) по параметрам скважины.
 
 **Модель:** стекинг (RandomForest + GradientBoosting + DecisionTree + LinearRegression)  
