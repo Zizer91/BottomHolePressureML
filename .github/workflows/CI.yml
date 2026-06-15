@@ -15,10 +15,12 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        - name: Install dependencies
+        run: |
+        python -m pip install --upgrade pip\
+        pip install flake8 pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -e .
     - name: Lint with flake8 (optional, потом добавим)
       run: |
         pip install flake8
