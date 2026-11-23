@@ -212,9 +212,7 @@ def build_pdf(project: Project, res: CalcResult, path: str) -> None:
 
     # ---- 3. прогноз
     s += [PageBreak(), P("3. Ожидаемые параметры работы скважины", "h1")]
-    s.append(P(f"Прогноз выполнен на {len(res.forecast.rows)} мес. с экспоненциальным падением дебита "
-               f"{res.forecast.decline * 100:.1f} %/мес ({res.forecast.decline_source}). Обводнённость и "
-               "забойное давление приняты неизменными."))
+    s.append(P(rt.forecast_method(res)))
     s.append(figure(charts.forecast_chart(res),
                     "Диаграмма работы скважины с планируемыми параметрами (Qж, Qн, % обв., Рзаб) на 1 год"))
     s.append(tcap("Планируемые параметры работы скважины по месяцам"))

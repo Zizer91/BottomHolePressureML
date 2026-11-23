@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFile
 
 from . import calc, charts, io_excel, report_pdf, report_xlsx
 from . import report_text as rt
-from .models import HistoryRow, Port, Project, SurveyRow
+from .models import ForecastPoint, HistoryRow, Port, Project, SurveyRow
 from .resources import asset
 
 FILE_FILTER = "Проект AcidClean PRO (*.acp);;Все файлы (*)"
@@ -26,7 +26,9 @@ CHOICES = {
     ("design", "acid_mode"): [("fixed", "Объём на порт задан"), ("pore", "Доля порового объёма трещины")],
     ("design", "skin_after_mode"): [("fixed", "Задан (по умолчанию −2)"),
                                     ("calc", "Расчёт по доле промытой трещины")],
+    ("design", "forecast_mode"): [("exp", "Экспонента (темп падения)"), ("table", "По таблице (задаёт пользователь)")],
 }
+FORECAST_FIELDS = [("design", "forecast_mode"), ("design", "forecast_decline"), ("design", "forecast_months")]
 
 SECTIONS = [
     ("Скважина и конструкция", [("well", "Скважина"), ("construction", "Конструкция и оборудование")]),
@@ -172,6 +174,7 @@ class MainWindow(QMainWindow):
         nl = QVBoxLayout(nw)
         nl.addWidget(QLabel("Примечание (выводится во введении отчёта):"))
         nl.addWidget(self.notes)
+        self.tabs.insertTab(3, self._forecast_tab(), "Прогноз после ОПЗ")
         self.tabs.addTab(nw, "Примечание")
         self.tabs.addTab(self._results_tab(), "Результаты")
         self.populate()
@@ -213,6 +216,19 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self.about)
         hm.addAction(a)
 
+    def _add_field(self, form, s, attr):
+        label, unit = next((lb, u) for s_, a_, lb, u in io_excel.FIELDS if (s_, a_) == (s, attr))
+        if (s, attr) in CHOICES:
+            ed = QComboBox()
+            for val, text in CHOICES[(s, attr)]:
+                ed.addItem(text, val)
+            label = label.split(" (")[0]
+        else:
+            ed = QLineEdit()
+        form.addRow(f"{label}{', ' + unit if unit else ''}:", ed)
+        self.fields[(s, attr)] = ed
+        return ed
+
     def _form_tab(self, secs):
         w = QWidget()
         lay = QVBoxLayout(w)
@@ -220,24 +236,89 @@ class MainWindow(QMainWindow):
             box = QGroupBox(title)
             form = QFormLayout(box)
             for s, attr, label, unit in io_excel.FIELDS:
-                if s != sec:
-                    continue
-                if (s, attr) in CHOICES:
-                    ed = QComboBox()
-                    for val, text in CHOICES[(s, attr)]:
-                        ed.addItem(text, val)
-                else:
-                    ed = QLineEdit()
-                if (s, attr) in CHOICES:
-                    label = label.split(" (")[0]
-                form.addRow(f"{label}{', ' + unit if unit else ''}:", ed)
-                self.fields[(s, attr)] = ed
+                if s == sec and (s, attr) not in FORECAST_FIELDS:
+                    self._add_field(form, s, attr)
             lay.addWidget(box)
         lay.addStretch()
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setWidget(w)
         return sc
+
+    def _forecast_tab(self):
+        sp = QSplitter()
+        left = QWidget()
+        ll = QVBoxLayout(left)
+        box = QGroupBox("Способ прогноза")
+        form = QFormLayout(box)
+        for s, attr in FORECAST_FIELDS:
+            self._add_field(form, s, attr)
+        ll.addWidget(box)
+        ll.addWidget(QLabel("Режим «По таблице»: Qж в % от запускного дебита по месяцам. Пустые обводнённость "
+                            "и Рзаб — как в предыдущем месяце (в 1-м — как до ОПЗ). При изменении Рзаб Qж "
+                            "пересчитывается пропорционально депрессии. Добыча без ОПЗ падает по экспоненте "
+                            "с темпом выше (0 — по истории)."))
+        ll.itemAt(ll.count() - 1).widget().setWordWrap(True)
+        b_fill = QPushButton("Заполнить по экспоненте")
+        b_fill.clicked.connect(self.fill_forecast_exp)
+        self.fc_table = Table([("Месяц", "month", "int"), ("Qж, % от\nзапускного", "q_pct", "float"),
+                               ("Обв., %\n(необяз.)", "water_cut", "optfloat"),
+                               ("Рзаб, атм\n(необяз.)", "p_bhp", "optfloat")], extra_buttons=[b_fill])
+        self.fc_table.table.horizontalHeader().setDefaultSectionSize(95)
+        ll.addWidget(self.fc_table, 1)
+        sp.addWidget(left)
+        right = QWidget()
+        self.fc_chart_layout = QVBoxLayout(right)
+        self.fc_chart_layout.setContentsMargins(0, 0, 0, 0)
+        self.fc_msg = QLabel("")
+        self.fc_msg.setWordWrap(True)
+        self.fc_msg.setStyleSheet("color:#9B1B30")
+        self.fc_chart_layout.addWidget(self.fc_msg)
+        sp.addWidget(right)
+        sp.setSizes([470, 800])
+        self.fc_canvas = None
+        self._fc_timer = QTimer(self)
+        self._fc_timer.setSingleShot(True)
+        self._fc_timer.setInterval(600)
+        self._fc_timer.timeout.connect(self.refresh_forecast_chart)
+        self.fc_table.table.itemChanged.connect(lambda *_: self._fc_timer.start())
+        self.fc_table.table.model().rowsRemoved.connect(lambda *_: self._fc_timer.start())
+        self.fields[("design", "forecast_mode")].currentIndexChanged.connect(lambda *_: self._fc_timer.start())
+        for key in (("design", "forecast_decline"), ("design", "forecast_months")):
+            self.fields[key].editingFinished.connect(self._fc_timer.start)
+        self.tabs.currentChanged.connect(
+            lambda i: self._fc_timer.start() if self.tabs.widget(i) is sp else None)
+        self._fc_tab = sp
+        return sp
+
+    def fill_forecast_exp(self):
+        def go():
+            p = self.collect()
+            dec, src = calc.base_decline(p)
+            months = int(p.design.forecast_months or 12)
+            self.fc_table.set_rows(calc.exp_table(dec, months))
+            box = self.fields[("design", "forecast_mode")]
+            box.setCurrentIndex(box.findData("table"))
+            self.statusBar().showMessage(f"Таблица заполнена: падение {dec * 100:.1f} %/мес ({src})")
+        self._guard(go)
+
+    def refresh_forecast_chart(self):
+        if self.tabs.currentWidget() is not self._fc_tab:
+            return
+        try:
+            p = self.collect()
+            r = calc.run(p)
+            fig = charts.forecast_chart(r)
+            self.fc_msg.setText(f"Доп. добыча нефти за {len(r.forecast.rows)} мес.: "
+                                f"{r.forecast.extra_oil_total:.0f} т")
+        except Exception as e:
+            self.fc_msg.setText(f"Предпросмотр недоступен: {e}")
+            return
+        if self.fc_canvas is not None:
+            self.fc_chart_layout.removeWidget(self.fc_canvas)
+            self.fc_canvas.setParent(None)
+        self.fc_canvas = FigureCanvasQTAgg(fig)
+        self.fc_chart_layout.addWidget(self.fc_canvas, 1)
 
     def _survey_tab(self):
         sp = QSplitter()
@@ -317,6 +398,7 @@ class MainWindow(QMainWindow):
         self.ports.set_rows(p.ports)
         self.history.set_rows(p.history)
         self.survey.set_rows(p.survey)
+        self.fc_table.set_rows(p.forecast_table)
         self.notes.setPlainText(p.notes)
         self.refresh_survey_chart()
         self._update_title()
@@ -347,6 +429,7 @@ class MainWindow(QMainWindow):
         p.ports = self.ports.rows(Port)
         p.history = self.history.rows(HistoryRow)
         p.survey = self.survey.rows(SurveyRow)
+        p.forecast_table = self.fc_table.rows(ForecastPoint)
         p.notes = self.notes.toPlainText()
         return p
 

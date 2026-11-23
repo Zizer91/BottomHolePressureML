@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from .models import Port, Project
+from .models import ForecastPoint, Port, Project
 
 G = 9.80665
 ATM = 101325.0
@@ -358,27 +358,66 @@ class ForecastRow:
 
 @dataclass
 class Forecast:
-    decline: float       # доли/мес
+    decline: float       # доли/мес (для режима "exp" и базовой добычи)
     decline_source: str = ""
+    mode: str = "exp"
     rows: List[ForecastRow] = field(default_factory=list)
 
     @property
     def extra_oil_total(self):
         return sum(r.extra_oil for r in self.rows)
 
+    @property
+    def effect_end_month(self):
+        """Первый месяц, когда дебит нефти опустился ниже базового (эффект закончился)."""
+        return next((r.month for r in self.rows if r.q_oil <= r.q_oil_base), None)
 
-def forecast(project: Project, prod: ProductivityResult, points=None) -> Forecast:
+
+def oil_share(water_cut_pct: float, oil_density: float, water_density: float) -> float:
+    """Тонн нефти на 1 м3 жидкости при весовой обводнённости."""
+    w = min(max(water_cut_pct, 0.0), 100.0) / 100.0
+    if w >= 1.0:
+        return 0.0
+    return (1 - w) / ((1 - w) / oil_density + w / water_density)
+
+
+def base_decline(project: Project, points=None) -> Tuple[float, str]:
+    """Темп падения, доли/мес, и его источник."""
     d = project.design
     if d.forecast_decline and d.forecast_decline > 0:
-        dec = d.forecast_decline / 100.0
-        src = "задан пользователем"
-    else:
-        dec = estimate_decline(points if points is not None else history_points(project))
-        src = "оценён по истории добычи нефти (экспонента, последние 12 мес.)"
-        if dec < 0.005:
-            dec = DEFAULT_DECLINE
-            src = "по истории падение не выявлено — принят по умолчанию"
-    fc = Forecast(dec, src)
+        return d.forecast_decline / 100.0, "задан пользователем"
+    dec = estimate_decline(points if points is not None else history_points(project))
+    if dec < 0.005:
+        return DEFAULT_DECLINE, "по истории падение не выявлено — принят по умолчанию"
+    return dec, "оценён по истории добычи нефти (экспонента, последние 12 мес.)"
+
+
+def exp_table(decline: float, months: int) -> List[ForecastPoint]:
+    """Таблица прогноза по экспоненте (для заполнения таблицы в интерфейсе)."""
+    return [ForecastPoint(m, round(100 * math.exp(-decline * (m - 1)), 1), None, None)
+            for m in range(1, months + 1)]
+
+
+def forecast(project: Project, prod: ProductivityResult, points=None) -> Forecast:
+    d, res = project.design, project.reservoir
+    dec, src = base_decline(project, points)
+    table = sorted(project.forecast_table, key=lambda r: r.month)
+    if d.forecast_mode == "table" and table:
+        fc = Forecast(dec, src, mode="table")
+        share0 = oil_share(prod.water_cut, res.oil_density, res.water_density)
+        k_oil = (prod.q_oil_after / prod.q_liq_after / share0) if prod.q_liq_after and share0 else 1.0
+        dp0 = res.p_res - prod.p_bhp
+        wc, pb = prod.water_cut, prod.p_bhp
+        for row in table:
+            wc = row.water_cut if row.water_cut is not None else wc
+            pb = row.p_bhp if row.p_bhp is not None else pb
+            dp = max(0.0, res.p_res - pb)
+            ql = prod.q_liq_after * row.q_pct / 100.0 * (dp / dp0 if dp0 > 0 else 1.0)
+            qo = ql * oil_share(wc, res.oil_density, res.water_density) * k_oil
+            qob = prod.q_oil_before * math.exp(-dec * (row.month - 0.5))
+            fc.rows.append(ForecastRow(row.month, ql, qo, wc, pb, qob, max(0.0, qo - qob) * DAYS_IN_MONTH))
+        return fc
+    fc = Forecast(dec, src, mode="exp")
     for m in range(1, int(d.forecast_months) + 1):
         f_mid = math.exp(-dec * (m - 0.5))
         f_end = math.exp(-dec * (m - 1))
@@ -598,6 +637,15 @@ def validate(project: Project) -> List[str]:
         errs.append("Не задан расход закачки")
     if project.construction.tubing_id <= 0:
         errs.append("Не задан внутренний диаметр НКТ")
+    if project.design.forecast_mode == "table":
+        if not project.forecast_table:
+            errs.append("Прогноз «по таблице»: таблица прогноза пуста (заполните её или нажмите "
+                        "«Заполнить по экспоненте»)")
+        months = [r.month for r in project.forecast_table]
+        if len(set(months)) != len(months):
+            errs.append("Таблица прогноза: месяцы повторяются")
+        if any(r.q_pct < 0 for r in project.forecast_table):
+            errs.append("Таблица прогноза: Qж не может быть отрицательным")
     return errs
 
 

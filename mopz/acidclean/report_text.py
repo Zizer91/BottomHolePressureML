@@ -129,6 +129,19 @@ def table_results(r: CalcResult):
     return head, rows
 
 
+def forecast_method(r: CalcResult) -> str:
+    fc = r.forecast
+    base = f"{fc.decline * 100:.1f} %/мес ({fc.decline_source})"
+    if fc.mode == "table":
+        return ("Прогноз задан пользователем по месяцам (дебит жидкости в % от запускного, "
+                "обводнённость и забойное давление). Дебит нефти рассчитан по дебиту жидкости и "
+                "обводнённости; при изменении забойного давления дебит жидкости пересчитан "
+                f"пропорционально депрессии. Добыча без ОПЗ падает по экспоненте с темпом {base}. "
+                "Дополнительная добыча учитывается, пока дебит нефти выше базового.")
+    return (f"Прогноз выполнен с экспоненциальным падением дебита {base}. Обводнённость и забойное "
+            "давление приняты неизменными.")
+
+
 def table_forecast(r: CalcResult):
     head = ["Месяц", "Qж, м3/сут", "Qн, т/сут", "Обв., %", "Рзаб, атм", "Qн без ОПЗ, т/сут",
             "Доп. добыча, т"]
@@ -162,7 +175,10 @@ def conclusions(p: Project, r: CalcResult) -> List[str]:
         f"дебит нефти {f(pr.q_oil_before, 2)} → {f(pr.q_oil_after, 2)} т/сут, скин-фактор "
         f"{pr.skin_before:+.1f} → {pr.skin_after:+.1f}, Кпрод {f(pr.j_before, 3)} → {f(pr.j_after, 3)} м3/сут/атм.",
         f"Дополнительная добыча нефти за {len(r.forecast.rows)} мес. — {f(r.forecast.extra_oil_total, 0)} т "
-        f"(темп падения {r.forecast.decline * 100:.1f} %/мес, {r.forecast.decline_source}).",
+        + ("(прогноз задан по месяцам в табличном виде)." if r.forecast.mode == "table" else
+           f"(темп падения {r.forecast.decline * 100:.1f} %/мес, {r.forecast.decline_source}).")
+        + (f" Эффект от ОПЗ заканчивается на {r.forecast.effect_end_month}-м месяце (дебит нефти "
+           "опускается ниже базового)." if r.forecast.effect_end_month else ""),
     ]
     if r.loss.loss_pct is not None:
         out.append(f"По данным входного контроля потеря продуктивности составляет {r.loss.loss_pct:.0f} % "

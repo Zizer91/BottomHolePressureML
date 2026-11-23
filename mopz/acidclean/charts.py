@@ -166,12 +166,15 @@ def forecast_chart(res: CalcResult) -> Figure:
     ax.fill_between(m[1:], qb[1:], qo[1:], color=OIL, alpha=0.12)
     ax.set_xlabel("Месяц после ОПЗ (0 — до ОПЗ)")
     ax.set_ylabel("Дебит")
+    ax.set_ylim(bottom=0)
     ax.set_xticks(m)
     ax2 = ax.twinx()
-    ax2.plot(m, [prod.water_cut] * len(m), "--", color=GREY, label="Обв., %")
-    ax2.plot(m, [prod.p_bhp] * len(m), "-", color=RED, label="Рзаб, атм")
+    wc = [prod.water_cut] + [r.water_cut for r in fc.rows]
+    pb = [prod.p_bhp] + [r.p_bhp for r in fc.rows]
+    ax2.plot(m, wc, "--", color=GREY, label="Обв., %")
+    ax2.plot(m, pb, "-", color=RED, label="Рзаб, атм")
     ax2.set_ylabel("Обводнённость, % / Рзаб, атм")
-    ax2.set_ylim(0, max(100, prod.p_bhp * 1.3))
+    ax2.set_ylim(0, max(100, max(pb) * 1.3))
     ax2.grid(False)
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()

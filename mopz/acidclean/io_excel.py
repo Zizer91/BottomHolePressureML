@@ -13,7 +13,7 @@ from typing import List, Optional
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
-from .models import HistoryRow, Port, Project, SurveyRow
+from .models import ForecastPoint, HistoryRow, Port, Project, SurveyRow
 
 # (раздел, атрибут, подпись, ед. изм.)
 FIELDS = [
@@ -67,6 +67,7 @@ FIELDS = [
     ("design", "injectivity", "Приемистость порта до ОПЗ", "м3/сут/атм"),
     ("design", "friction_factor", "Множитель потерь на трение", ""),
     ("design", "gap_minutes", "Пауза между портами на графике", "мин"),
+    ("design", "forecast_mode", "Прогноз (exp — экспонента / table — по таблице)", ""),
     ("design", "forecast_decline", "Темп падения дебита (0 — по истории)", "%/мес"),
     ("design", "forecast_months", "Период прогноза", "мес"),
 ]
@@ -76,6 +77,7 @@ PORT_HEAD = ["№ муфты", "MD, м", "Xf, м", "H, м", "w, мм", "Пров
              "Объём ГКС, м3 (необяз.)", "Объём продавки, м3 (необяз.)"]
 HIST_HEAD = ["Дата", "Рзаб, атм", "Qн, т/сут", "Qж, т/сут", "Обв., % вес.", "Рпл, атм (необяз.)"]
 SURV_HEAD = ["MD, м", "Зенит, °", "Азимут, °"]
+FC_HEAD = ["Месяц", "Qж, % от запускного", "Обв., % (необяз.)", "Рзаб, атм (необяз.)"]
 
 BOLD = Font(bold=True)
 FILL = PatternFill("solid", fgColor="F3E6E8")
@@ -116,6 +118,12 @@ def export_template(project: Project, path: str) -> None:
     _hdr(ws, SURV_HEAD)
     for s in project.survey:
         ws.append([s.md, s.incl, s.azim])
+    ws = wb.create_sheet("Прогноз")
+    _hdr(ws, FC_HEAD)
+    for r in project.forecast_table:
+        ws.append([r.month, r.q_pct, r.water_cut, r.p_bhp])
+    for col in "ABCD":
+        ws.column_dimensions[col].width = 22
     wb.save(path)
 
 
@@ -194,6 +202,16 @@ def import_template(path: str, project: Optional[Project] = None) -> Project:
         sv = read_survey_ws(ws)
         if sv:
             p.survey = sv
+    ws = _sheet(wb, "Прогноз")
+    if ws is not None:
+        fc = []
+        for r in ws.iter_rows(min_row=2, values_only=True):
+            r = list(r or []) + [None] * 4
+            if _f(r[0]) is None or _f(r[1]) is None:
+                continue
+            fc.append(ForecastPoint(int(_f(r[0])), _f(r[1]), _f(r[2]), _f(r[3])))
+        if fc:
+            p.forecast_table = fc
     return p
 
 

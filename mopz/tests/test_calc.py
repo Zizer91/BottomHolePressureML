@@ -104,3 +104,43 @@ def test_save_load_roundtrip(project, tmp_path):
 def test_validation():
     with pytest.raises(ValueError):
         calc.run(Project())
+
+
+def test_forecast_table_mode(project):
+    from acidclean.models import ForecastPoint
+    r_exp = calc.run(project)
+    dec = r_exp.forecast.decline
+    # таблица по экспоненте даёт те же дебиты, что и режим exp
+    project.design.forecast_mode = "table"
+    project.forecast_table = calc.exp_table(dec, 12)
+    r_tab = calc.run(project)
+    assert r_tab.forecast.mode == "table"
+    for a, b in zip(r_exp.forecast.rows, r_tab.forecast.rows):
+        assert b.q_liq == pytest.approx(a.q_liq, rel=2e-3)
+        assert b.q_oil == pytest.approx(a.q_oil, rel=2e-3)
+    # рост обводнённости снижает нефть, снижение Рзаб увеличивает жидкость пропорционально депрессии
+    q1 = r_tab.prod.q_liq_after
+    project.forecast_table = [ForecastPoint(1, 100, None, None), ForecastPoint(2, 100, 50.0, 34 - 17)]
+    r = calc.run(project)
+    m1, m2 = r.forecast.rows
+    assert m1.q_liq == pytest.approx(q1)
+    assert m1.q_oil == pytest.approx(r.prod.q_oil_after)
+    assert m2.q_liq == pytest.approx(q1 * (204 - 17) / (204 - 34))
+    assert m2.q_oil / m2.q_liq < m1.q_oil / m1.q_liq
+    assert m2.water_cut == 50.0 and m2.p_bhp == 17
+
+
+def test_forecast_table_validation(project):
+    project.design.forecast_mode = "table"
+    project.forecast_table = []
+    with pytest.raises(ValueError, match="таблица прогноза пуста"):
+        calc.run(project)
+
+
+def test_forecast_negative_effect_not_counted(project):
+    from acidclean.models import ForecastPoint
+    project.design.forecast_mode = "table"
+    project.forecast_table = [ForecastPoint(1, 100), ForecastPoint(2, 10)]
+    fc = calc.run(project).forecast
+    assert fc.rows[1].extra_oil == 0
+    assert fc.effect_end_month == 2

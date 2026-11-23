@@ -97,6 +97,15 @@ class SurveyRow:
 
 
 @dataclass
+class ForecastPoint:
+    """Строка табличного прогноза после ОПЗ."""
+    month: int = 1
+    q_pct: float = 100.0               # Qж, % от запускного (при запускном Рзаб)
+    water_cut: Optional[float] = None  # %, пусто — как в предыдущем месяце
+    p_bhp: Optional[float] = None      # атм, пусто — как в предыдущем месяце
+
+
+@dataclass
 class Design:
     acid_name: str = "ГКС (2%HF+14%HCl)"
     acid_density: float = 1.07     # г/см3
@@ -114,7 +123,8 @@ class Design:
     injectivity: float = 4.3       # м3/сут/атм, приемистость порта до ОПЗ (уточнить тестом)
     friction_factor: float = 1.0   # множитель потерь на трение (понизитель трения < 1)
     gap_minutes: float = 0.0       # мин, пауза между портами на графике
-    forecast_decline: float = 0.0  # %/мес, темп падения эффекта; 0 — оценить по истории
+    forecast_mode: str = "exp"     # "exp" — экспонента, "table" — по таблице прогноза
+    forecast_decline: float = 0.0  # %/мес, темп падения; 0 — оценить по истории
     forecast_months: int = 12
 
 
@@ -128,6 +138,7 @@ class Project:
     ports: List[Port] = field(default_factory=list)
     history: List[HistoryRow] = field(default_factory=list)
     survey: List[SurveyRow] = field(default_factory=list)
+    forecast_table: List[ForecastPoint] = field(default_factory=list)
     notes: str = ""
 
     # ---- сериализация -------------------------------------------------
@@ -151,6 +162,7 @@ class Project:
             ports=[build(Port, p) for p in d.get("ports", [])],
             history=[build(HistoryRow, h) for h in d.get("history", [])],
             survey=[build(SurveyRow, s) for s in d.get("survey", [])],
+            forecast_table=[build(ForecastPoint, f) for f in d.get("forecast_table", [])],
             notes=d.get("notes", ""),
         )
 
