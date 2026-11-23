@@ -5,8 +5,8 @@ import os
 import sys
 import traceback
 
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from PySide6.QtCore import Qt
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
@@ -144,11 +144,11 @@ class MainWindow(QMainWindow):
             self.tabs.addTab(self._form_tab(secs), title)
         self.ports = Table([("№ муфты", "number", "int"), ("MD, м", "md", "float"), ("Xf, м", "xf", "float"),
                             ("H, м", "height", "float"), ("w, мм", "width_mm", "float"),
-                            ("Проводимость, мД·м", "conductivity", "float"),
-                            ("Проницаемость, мД", "permeability", "float"),
-                            ("Скин после ГРП", "skin_frac", "float"), ("Обрабатывать", "treat", "bool"),
-                            ("ГКС, м3 (свой)", "acid_volume", "optfloat"),
-                            ("Продавка, м3 (своя)", "flush_volume", "optfloat")])
+                            ("Проводимость,\nмД·м", "conductivity", "float"),
+                            ("Проницаемость,\nмД", "permeability", "float"),
+                            ("Скин\nпосле ГРП", "skin_frac", "float"), ("Обрабатывать", "treat", "bool"),
+                            ("ГКС, м3\n(свой)", "acid_volume", "optfloat"),
+                            ("Продавка, м3\n(своя)", "flush_volume", "optfloat")])
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.addWidget(QLabel("Муфты МГРП и параметры закреплённых трещин из отчётов ГРП (столбец «факт»). "
@@ -159,14 +159,14 @@ class MainWindow(QMainWindow):
         b_hist.clicked.connect(self.import_history)
         self.history = Table([("Дата", "date", "str"), ("Рзаб, атм", "p_bhp", "optfloat"),
                               ("Qн, т/сут", "q_oil", "optfloat"), ("Qж, т/сут", "q_liq", "optfloat"),
-                              ("Обв., % вес.", "water_cut", "optfloat"), ("Рпл, атм (необяз.)", "p_res", "optfloat")],
+                              ("Обв., % вес.", "water_cut", "optfloat"), ("Рпл, атм\n(необяз.)", "p_res", "optfloat")],
                              extra_buttons=[b_hist])
         self.tabs.addTab(self.history, "История (входной контроль)")
         b_surv = QPushButton("Импорт из Excel…")
         b_surv.clicked.connect(self.import_survey)
         self.survey = Table([("MD, м", "md", "float"), ("Зенит, °", "incl", "float"),
                              ("Азимут, °", "azim", "float")], extra_buttons=[b_surv])
-        self.tabs.addTab(self.survey, "Инклинометрия")
+        self.tabs.addTab(self._survey_tab(), "Инклинометрия")
         self.notes = QPlainTextEdit()
         nw = QWidget()
         nl = QVBoxLayout(nw)
@@ -239,6 +239,51 @@ class MainWindow(QMainWindow):
         sc.setWidget(w)
         return sc
 
+    def _survey_tab(self):
+        sp = QSplitter()
+        self.survey.table.horizontalHeader().setDefaultSectionSize(90)
+        sp.addWidget(self.survey)
+        right = QWidget()
+        self.survey_chart_layout = QVBoxLayout(right)
+        self.survey_chart_layout.setContentsMargins(0, 0, 0, 0)
+        sp.addWidget(right)
+        sp.setSizes([360, 900])
+        self.survey_canvas = None
+        self.survey_toolbar = None
+        self._survey_timer = QTimer(self)
+        self._survey_timer.setSingleShot(True)
+        self._survey_timer.setInterval(500)
+        self._survey_timer.timeout.connect(self.refresh_survey_chart)
+        for t in (self.survey.table, self.ports.table):
+            t.itemChanged.connect(lambda *_: self._survey_timer.start())
+            t.model().rowsRemoved.connect(lambda *_: self._survey_timer.start())
+        return sp
+
+    def refresh_survey_chart(self):
+        """Перерисовать геометрию ствола по текущей таблице (ошибочные ячейки не мешают)."""
+        try:
+            rows = self.survey.rows(SurveyRow)
+        except ValueError as e:
+            self.statusBar().showMessage(f"Инклинометрия: {e}")
+            return
+        try:
+            ports = self.ports.rows(Port)
+        except ValueError:
+            ports = []
+        try:
+            funnel = _num(self.fields[("construction", "funnel_md")].text()) or 0.0
+        except ValueError:
+            funnel = 0.0
+        fig = charts.survey_chart(rows, ports, funnel)
+        for wdg in (self.survey_toolbar, self.survey_canvas):
+            if wdg is not None:
+                self.survey_chart_layout.removeWidget(wdg)
+                wdg.setParent(None)
+        self.survey_canvas = FigureCanvasQTAgg(fig)
+        self.survey_toolbar = NavigationToolbar2QT(self.survey_canvas, self)
+        self.survey_chart_layout.addWidget(self.survey_toolbar)
+        self.survey_chart_layout.addWidget(self.survey_canvas, 1)
+
     def _results_tab(self):
         w = QWidget()
         lay = QHBoxLayout(w)
@@ -273,6 +318,7 @@ class MainWindow(QMainWindow):
         self.history.set_rows(p.history)
         self.survey.set_rows(p.survey)
         self.notes.setPlainText(p.notes)
+        self.refresh_survey_chart()
         self._update_title()
 
     def collect(self) -> Project:
@@ -397,6 +443,7 @@ class MainWindow(QMainWindow):
             if not rows:
                 raise ValueError("Не найден лист с заголовками «Глубина», «Зенит», «Азимут»")
             self.survey.set_rows(rows)
+            self.refresh_survey_chart()
             self.statusBar().showMessage(f"Загружено замеров инклинометрии: {len(rows)}")
         self._guard(go)
 

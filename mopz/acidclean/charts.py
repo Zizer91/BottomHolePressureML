@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
-from .calc import CalcResult, treated  # noqa: E402
+from .calc import CalcResult, interp, survey_trajectory, treated  # noqa: E402
 
 RED = "#9B1B30"
 ACID = "#3BAA5C"
@@ -255,6 +255,74 @@ def skin_chart(res: CalcResult) -> Figure:
     ax.set_ylabel("Скин-фактор")
     ax.set_title("Изменение скин-фактора по зонам обработки")
     ax.legend(fontsize=7)
+    return fig
+
+
+def survey_chart(survey, ports=(), funnel_md: float = 0.0, w=8.0, h=7.5) -> Figure:
+    """Геометрия ствола: вертикальный профиль, план, горизонтальный участок с муфтами."""
+    fig = _fig(w, h)
+    t = survey_trajectory(survey)
+    if len(t.md) < 2:
+        ax = fig.add_subplot()
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Нет данных инклинометрии\n(нужно минимум 2 замера: MD, зенит, азимут)",
+                ha="center", va="center", transform=ax.transAxes, color=GREY)
+        return fig
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.6, 1], height_ratios=[1.25, 1])
+    ax_vs = fig.add_subplot(gs[0, 0])
+    ax_pl = fig.add_subplot(gs[0, 1])
+    ax_hz = fig.add_subplot(gs[1, :])
+    az, vs = t.vertical_section()
+    ports = [p for p in ports if t.md[0] <= p.md <= t.md[-1] + 1e-6]
+
+    def at(md, ys):
+        return interp(md, t.md, ys)
+
+    # вертикальный профиль
+    ax_vs.plot(vs, t.tvd, color="black", lw=1.6)
+    ax_vs.invert_yaxis()
+    ax_vs.set_xlabel(f"Смещение по азимуту {az:.0f}°, м")
+    ax_vs.set_ylabel("TVD, м")
+    ax_vs.set_title("Вертикальный профиль")
+    # план
+    ax_pl.plot(t.east, t.north, color="black", lw=1.6)
+    ax_pl.plot([0], [0], "o", color=GREY, ms=5)
+    ax_pl.set_aspect("equal", adjustable="datalim")
+    ax_pl.set_xlabel("Восток, м")
+    ax_pl.set_ylabel("Север, м")
+    ax_pl.set_title("План")
+    # горизонтальный участок
+    start = min([p.md for p in ports] + [t.md[-1]]) - 250 if ports else t.md[-1] - 1200
+    i0 = max(0, next((i for i, m in enumerate(t.md) if m >= start), 0) - 1)
+    ax_hz.plot(t.md[i0:], t.tvd[i0:], color="black", lw=1.6, label="Ствол")
+    ax_hz.invert_yaxis()
+    ax_hz.set_xlabel("MD, м")
+    ax_hz.set_ylabel("TVD, м")
+    ax_hz.set_title("Горизонтальный участок (масштаб по TVD увеличен)")
+    for p in ports:
+        col = RED if p.treat else GREY
+        x_vs, y = at(p.md, vs), at(p.md, t.tvd)
+        ax_vs.plot(x_vs, y, "v", color=col, ms=6)
+        ax_pl.plot(at(p.md, t.east), at(p.md, t.north), "v", color=col, ms=6)
+        ax_hz.plot(p.md, y, "v", color=col, ms=8)
+        ax_hz.annotate(f"МГРП{p.number}\n{p.md:.0f}", (p.md, y), textcoords="offset points",
+                       xytext=(0, 9), ha="center", fontsize=7, color=col)
+    if funnel_md and t.md[0] <= funnel_md <= t.md[-1]:
+        y = at(funnel_md, t.tvd)
+        ax_hz.axvline(funnel_md, color=WATER, ls="--", lw=1)
+        ax_hz.annotate(f"Воронка {funnel_md:.0f}", (funnel_md, y), textcoords="offset points",
+                       xytext=(4, -14), fontsize=7, color=WATER)
+        ax_vs.plot(at(funnel_md, vs), y, "s", color=WATER, ms=5)
+    lo, hi = ax_hz.get_ylim()
+    pad = max(2.0, abs(lo - hi) * 0.25)
+    ax_hz.set_ylim(lo + pad, hi - pad)
+    handles = [Patch(color=RED, label="Муфта ГРП (обрабатывается)"),
+               Patch(color=GREY, label="Муфта ГРП (не обрабатывается)")]
+    if funnel_md:
+        handles.append(Patch(color=WATER, label="Полированная воронка"))
+    ax_hz.legend(handles=handles, loc="lower left", fontsize=7, ncol=3)
+    fig.suptitle(f"Геометрия ствола: забой MD {t.md[-1]:.0f} м, TVD {t.tvd[-1]:.1f} м, "
+                 f"смещение {vs[-1]:.0f} м", fontsize=10)
     return fig
 
 

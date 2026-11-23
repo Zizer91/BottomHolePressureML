@@ -40,13 +40,31 @@ DAYS_IN_MONTH = 30.4
 # ---------------------------------------------------------------------------
 # Инклинометрия
 # ---------------------------------------------------------------------------
-def survey_tvd(project: Project) -> Tuple[List[float], List[float]]:
-    """MD → TVD (от ротора) методом минимальной кривизны."""
-    rows = sorted(project.survey, key=lambda r: r.md)
+@dataclass
+class Trajectory:
+    md: List[float]
+    tvd: List[float]
+    north: List[float]
+    east: List[float]
+
+    def vertical_section(self) -> Tuple[float, List[float]]:
+        """Азимут вертикального сечения (на забой), ° и смещения по нему, м."""
+        az = math.atan2(self.east[-1], self.north[-1]) if self.md else 0.0
+        vs = [n * math.cos(az) + e * math.sin(az) for n, e in zip(self.north, self.east)]
+        return math.degrees(az) % 360, vs
+
+
+def survey_trajectory(survey) -> Trajectory:
+    """Траектория ствола методом минимальной кривизны (TVD от ротора, N/E от устья)."""
+    rows = sorted([r for r in survey if r.md is not None], key=lambda r: r.md)
     if len(rows) < 2:
-        return [], []
-    md = [rows[0].md]
-    tvd = [rows[0].md if rows[0].incl == 0 else rows[0].md * math.cos(math.radians(rows[0].incl))]
+        return Trajectory([], [], [], [])
+    r0 = rows[0]
+    i0, a0 = math.radians(r0.incl), math.radians(r0.azim)
+    md = [r0.md]
+    tvd = [r0.md * math.cos(i0)]
+    north = [r0.md * math.sin(i0) * math.cos(a0)]
+    east = [r0.md * math.sin(i0) * math.sin(a0)]
     for a, b in zip(rows[:-1], rows[1:]):
         dmd = b.md - a.md
         if dmd <= 0:
@@ -56,9 +74,34 @@ def survey_tvd(project: Project) -> Tuple[List[float], List[float]]:
         cos_dl = math.cos(i2 - i1) - math.sin(i1) * math.sin(i2) * (1 - math.cos(a2 - a1))
         dl = math.acos(max(-1.0, min(1.0, cos_dl)))
         rf = 1.0 if dl < 1e-9 else 2 / dl * math.tan(dl / 2)
+        k = dmd / 2 * rf
         md.append(b.md)
-        tvd.append(tvd[-1] + dmd / 2 * (math.cos(i1) + math.cos(i2)) * rf)
-    return md, tvd
+        tvd.append(tvd[-1] + k * (math.cos(i1) + math.cos(i2)))
+        north.append(north[-1] + k * (math.sin(i1) * math.cos(a1) + math.sin(i2) * math.cos(a2)))
+        east.append(east[-1] + k * (math.sin(i1) * math.sin(a1) + math.sin(i2) * math.sin(a2)))
+    return Trajectory(md, tvd, north, east)
+
+
+def survey_tvd(project: Project) -> Tuple[List[float], List[float]]:
+    """MD → TVD (от ротора) методом минимальной кривизны."""
+    t = survey_trajectory(project.survey)
+    return t.md, t.tvd
+
+
+def interp(x: float, xs: List[float], ys: List[float]) -> float:
+    if x <= xs[0]:
+        return ys[0]
+    if x >= xs[-1]:
+        return ys[-1]
+    lo, hi = 0, len(xs) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if xs[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+    t = (x - xs[lo]) / (xs[hi] - xs[lo])
+    return ys[lo] + t * (ys[hi] - ys[lo])
 
 
 def make_tvd_func(project: Project):
