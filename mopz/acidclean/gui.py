@@ -7,7 +7,7 @@ import traceback
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
                                QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSplitter,
@@ -27,6 +27,12 @@ CHOICES = {
     ("design", "skin_after_mode"): [("fixed", "Задан (по умолчанию −2)"),
                                     ("calc", "Расчёт по доле промытой трещины")],
     ("design", "forecast_mode"): [("exp", "Экспонента (темп падения)"), ("table", "По таблице (задаёт пользователь)")],
+}
+# переключатель -> {значение: поля, активные только при этом значении}
+DEPENDS = {
+    ("design", "acid_mode"): {"fixed": [("design", "acid_volume")], "pore": [("design", "pore_fraction")]},
+    ("design", "skin_after_mode"): {"fixed": [("design", "skin_after")], "calc": []},
+    ("design", "forecast_mode"): {"exp": [("design", "forecast_months")], "table": []},
 }
 FORECAST_FIELDS = [("design", "forecast_mode"), ("design", "forecast_decline"), ("design", "forecast_months")]
 
@@ -60,9 +66,10 @@ class Table(QWidget):
         self.columns = columns  # [(заголовок, ключ, тип)] тип: float|int|str|bool|optfloat
         lay = QVBoxLayout(self)
         bar = QHBoxLayout()
-        add = QPushButton("Добавить строку")
-        rem = QPushButton("Удалить выделенные")
-        add.clicked.connect(lambda: self.table.insertRow(self.table.rowCount()))
+        self.disabled = set()
+        self.add_btn = add = QPushButton("Добавить строку")
+        self.rem_btn = rem = QPushButton("Удалить выделенные")
+        add.clicked.connect(self._add_row)
         rem.clicked.connect(self._remove)
         bar.addWidget(add)
         bar.addWidget(rem)
@@ -76,6 +83,45 @@ class Table(QWidget):
         self.table.horizontalHeader().setDefaultSectionSize(110)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         lay.addWidget(self.table)
+
+    def _add_row(self):
+        self.table.insertRow(self.table.rowCount())
+        self._apply_disabled()
+
+    def set_column_enabled(self, key, enabled, hint=""):
+        """Сделать колонку недоступной для ввода (серой), значения сохраняются."""
+        if enabled:
+            self.disabled.discard(key)
+        else:
+            self.disabled.add(key)
+        j = [c[1] for c in self.columns].index(key)
+        hdr = self.table.horizontalHeaderItem(j)
+        if hdr is not None:
+            hdr.setForeground(QBrush(QColor("#9A9A9A" if not enabled else "#000000")))
+            hdr.setToolTip("" if enabled else hint)
+        self._apply_disabled()
+
+    def _apply_disabled(self):
+        grey = QBrush(QColor("#ECECEC"))
+        blocked = self.table.blockSignals(True)
+        for j, (_, key, typ) in enumerate(self.columns):
+            off = key in self.disabled
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, j)
+                if it is None:
+                    it = QTableWidgetItem("")
+                    self.table.setItem(r, j, it)
+                flags = it.flags()
+                flag = Qt.ItemFlag.ItemIsUserCheckable if typ == "bool" else Qt.ItemFlag.ItemIsEditable
+                it.setFlags(flags & ~flag if off else flags | flag)
+                it.setBackground(grey if off else QBrush())
+        self.table.blockSignals(blocked)
+
+    def set_enabled(self, enabled):
+        """Таблица целиком: только просмотр или редактирование."""
+        self.table.setEnabled(enabled)
+        self.add_btn.setEnabled(enabled)
+        self.rem_btn.setEnabled(enabled)
 
     def _remove(self):
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
@@ -96,6 +142,7 @@ class Table(QWidget):
                 else:
                     it = QTableWidgetItem(_fmt(v))
                 self.table.setItem(r, j, it)
+        self._apply_disabled()
 
     def rows(self, factory):
         out = []
@@ -113,10 +160,12 @@ class Table(QWidget):
                 try:
                     if typ == "str":
                         vals[key] = text.strip()
-                    elif typ == "int":
-                        vals[key] = int(_num(text) or 0)
                     elif typ == "optfloat":
                         vals[key] = _num(text)
+                    elif not text.strip():
+                        continue          # пустая ячейка — значение по умолчанию
+                    elif typ == "int":
+                        vals[key] = int(_num(text) or 0)
                     else:
                         vals[key] = _num(text) or 0.0
                 except ValueError:
@@ -177,6 +226,8 @@ class MainWindow(QMainWindow):
         self.tabs.insertTab(3, self._forecast_tab(), "Прогноз после ОПЗ")
         self.tabs.addTab(nw, "Примечание")
         self.tabs.addTab(self._results_tab(), "Результаты")
+        for sw in DEPENDS:
+            self.fields[sw].currentIndexChanged.connect(lambda *_: self.update_dependencies())
         self.populate()
         self.statusBar().showMessage("Создайте новый проект, откройте *.acp или загрузите шаблон Excel")
 
@@ -225,6 +276,7 @@ class MainWindow(QMainWindow):
             label = label.split(" (")[0]
         else:
             ed = QLineEdit()
+            label = label.split(" (режим")[0]
         form.addRow(f"{label}{', ' + unit if unit else ''}:", ed)
         self.fields[(s, attr)] = ed
         return ed
@@ -290,6 +342,25 @@ class MainWindow(QMainWindow):
             lambda i: self._fc_timer.start() if self.tabs.widget(i) is sp else None)
         self._fc_tab = sp
         return sp
+
+    def update_dependencies(self):
+        """Активны только поля, относящиеся к выбранным режимам."""
+        for sw, opts in DEPENDS.items():
+            box = self.fields[sw]
+            cur = box.currentData()
+            for val, keys in opts.items():
+                for key in keys:
+                    ed = self.fields[key]
+                    on = val == cur
+                    ed.setEnabled(on)
+                    ed.setToolTip("" if on else f"Не используется в режиме «{box.currentText()}»")
+                    form = ed.parentWidget().layout()
+                    if isinstance(form, QFormLayout) and form.labelForField(ed) is not None:
+                        form.labelForField(ed).setEnabled(on)
+        skin_calc = self.fields[("design", "skin_after_mode")].currentData() == "calc"
+        self.ports.set_column_enabled("skin_frac", skin_calc,
+                                      "Используется только в режиме «Скин после ОПЗ: расчёт по доле промытой трещины»")
+        self.fc_table.set_enabled(self.fields[("design", "forecast_mode")].currentData() == "table")
 
     def fill_forecast_exp(self):
         def go():
@@ -434,6 +505,7 @@ class MainWindow(QMainWindow):
         self.history.set_rows(p.history)
         self.survey.set_rows(p.survey)
         self.fc_table.set_rows(p.forecast_table)
+        self.update_dependencies()
         self.notes.setPlainText(p.notes)
         self.refresh_survey_chart()
         self.refresh_history_chart()
