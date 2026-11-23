@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
-from .calc import CalcResult, interp, survey_trajectory, treated  # noqa: E402
+from .calc import CalcResult, interp, parse_date, survey_trajectory, treated  # noqa: E402
 
 RED = "#9B1B30"
 ACID = "#3BAA5C"
@@ -258,6 +258,51 @@ def skin_chart(res: CalcResult) -> Figure:
     ax.set_ylabel("Скин-фактор")
     ax.set_title("Изменение скин-фактора по зонам обработки")
     ax.legend(fontsize=7)
+    return fig
+
+
+def work_chart(history, w=8.0, h=5.5) -> Figure:
+    """График работы скважины по таблице истории: Qн, Qж — основная ось; Рзаб и обв. — доп. оси."""
+    fig = _fig(w, h)
+    ax = fig.add_subplot()
+    rows = sorted([(parse_date(r.date), r) for r in history if parse_date(r.date)], key=lambda x: x[0])
+    if not rows:
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Нет данных истории\n(нужны дата и хотя бы один параметр)", ha="center",
+                va="center", transform=ax.transAxes, color=GREY)
+        return fig
+    d = [x[0] for x in rows]
+
+    def col(attr):
+        return [getattr(r, attr) if getattr(r, attr) is not None else float("nan") for _, r in rows]
+
+    l1 = ax.plot(d, col("q_liq"), "-o", ms=3, color=WATER, label="Qж, т/сут")
+    l2 = ax.plot(d, col("q_oil"), "-o", ms=3, color=OIL, label="Qн, т/сут")
+    ax.set_ylabel("Дебит, т/сут")
+    ax.set_ylim(bottom=0)
+    ax_p = ax.twinx()
+    l3 = ax_p.plot(d, col("p_bhp"), "-s", ms=3, color=RED, label="Рзаб, атм")
+    pr = col("p_res")
+    l5 = []
+    if any(v == v for v in pr):
+        l5 = ax_p.plot(d, pr, ":", color=RED, alpha=0.6, label="Рпл, атм")
+    ax_p.set_ylabel("Рзаб, атм", color=RED)
+    ax_p.tick_params(axis="y", colors=RED)
+    ax_p.set_ylim(bottom=0)
+    ax_p.grid(False)
+    ax_w = ax.twinx()
+    ax_w.spines["right"].set_position(("axes", 1.12))
+    ax_w.spines["right"].set_visible(True)
+    l4 = ax_w.plot(d, col("water_cut"), "--", color=GREY, label="Обв., %")
+    ax_w.set_ylabel("Обводнённость, %", color=GREY)
+    ax_w.tick_params(axis="y", colors=GREY)
+    ax_w.set_ylim(0, 100)
+    ax_w.grid(False)
+    lines = l1 + l2 + l3 + l5 + l4
+    ax.legend(lines, [ln.get_label() for ln in lines], loc="upper center", bbox_to_anchor=(0.5, -0.12),
+              ncol=len(lines), fontsize=8, frameon=False)
+    ax.set_title("График работы скважины")
+    fig.autofmt_xdate()
     return fig
 
 

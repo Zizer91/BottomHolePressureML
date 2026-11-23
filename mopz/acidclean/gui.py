@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
                               ("Qн, т/сут", "q_oil", "optfloat"), ("Qж, т/сут", "q_liq", "optfloat"),
                               ("Обв., % вес.", "water_cut", "optfloat"), ("Рпл, атм\n(необяз.)", "p_res", "optfloat")],
                              extra_buttons=[b_hist])
-        self.tabs.addTab(self.history, "История (входной контроль)")
+        self.tabs.addTab(self._history_tab(), "История (входной контроль)")
         b_surv = QPushButton("Импорт из Excel…")
         b_surv.clicked.connect(self.import_survey)
         self.survey = Table([("MD, м", "md", "float"), ("Зенит, °", "incl", "float"),
@@ -320,6 +320,41 @@ class MainWindow(QMainWindow):
         self.fc_canvas = FigureCanvasQTAgg(fig)
         self.fc_chart_layout.addWidget(self.fc_canvas, 1)
 
+    def _history_tab(self):
+        sp = QSplitter()
+        self.history.table.horizontalHeader().setDefaultSectionSize(85)
+        sp.addWidget(self.history)
+        right = QWidget()
+        self.hist_chart_layout = QVBoxLayout(right)
+        self.hist_chart_layout.setContentsMargins(0, 0, 0, 0)
+        sp.addWidget(right)
+        sp.setSizes([560, 760])
+        self.hist_canvas = None
+        self.hist_toolbar = None
+        self._hist_timer = QTimer(self)
+        self._hist_timer.setSingleShot(True)
+        self._hist_timer.setInterval(500)
+        self._hist_timer.timeout.connect(self.refresh_history_chart)
+        self.history.table.itemChanged.connect(lambda *_: self._hist_timer.start())
+        self.history.table.model().rowsRemoved.connect(lambda *_: self._hist_timer.start())
+        return sp
+
+    def refresh_history_chart(self):
+        try:
+            rows = self.history.rows(HistoryRow)
+        except ValueError as e:
+            self.statusBar().showMessage(f"История: {e}")
+            return
+        fig = charts.work_chart(rows)
+        for wdg in (self.hist_toolbar, self.hist_canvas):
+            if wdg is not None:
+                self.hist_chart_layout.removeWidget(wdg)
+                wdg.setParent(None)
+        self.hist_canvas = FigureCanvasQTAgg(fig)
+        self.hist_toolbar = NavigationToolbar2QT(self.hist_canvas, self)
+        self.hist_chart_layout.addWidget(self.hist_toolbar)
+        self.hist_chart_layout.addWidget(self.hist_canvas, 1)
+
     def _survey_tab(self):
         sp = QSplitter()
         self.survey.table.horizontalHeader().setDefaultSectionSize(90)
@@ -401,6 +436,7 @@ class MainWindow(QMainWindow):
         self.fc_table.set_rows(p.forecast_table)
         self.notes.setPlainText(p.notes)
         self.refresh_survey_chart()
+        self.refresh_history_chart()
         self._update_title()
 
     def collect(self) -> Project:
@@ -513,6 +549,7 @@ class MainWindow(QMainWindow):
                 raise ValueError("Не найден лист с заголовками «Дата», «Рзаб/забойное», «нефть», "
                                  "«жидкость», «обводнённость»")
             self.history.set_rows(rows)
+            self.refresh_history_chart()
             self.statusBar().showMessage(f"Загружено строк истории: {len(rows)}")
         self._guard(go)
 
