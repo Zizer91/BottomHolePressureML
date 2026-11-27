@@ -8,13 +8,14 @@ import traceback
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QKeySequence, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QColorDialog, QComboBox, QDialog,
+                               QDialogButtonBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
                                QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSplitter,
                                QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout,
                                QWidget)
 
-from . import calc, charts, io_excel, report_pdf, report_xlsx
+from . import calc, charts, interactive, io_excel, report_docx, report_pdf, report_xlsx, settings
 from . import report_text as rt
 from .models import ForecastPoint, HistoryRow, Port, Project, SurveyRow
 from .resources import asset
@@ -56,6 +57,36 @@ def _fmt(v):
     if isinstance(v, float):
         return f"{v:g}"
     return str(v)
+
+
+class ChartPanel(QWidget):
+    """Интерактивный график: панель масштаба, подсказки при наведении, клик по легенде."""
+
+    HINT = ("Наведите курсор на точку — значение; клик по легенде — скрыть/показать линию; "
+            "лупа и стрелки — масштаб и сдвиг, «домик» — сброс.")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(0, 0, 0, 0)
+        self.canvas = None
+        self.toolbar = None
+        self.hint = QLabel(self.HINT)
+        self.hint.setStyleSheet("color:#777; font-size:11px")
+        self.hint.setWordWrap(True)
+
+    def set_figure(self, fig):
+        for w in (self.toolbar, self.canvas):
+            if w is not None:
+                self.lay.removeWidget(w)
+                w.setParent(None)
+                w.deleteLater()
+        self.canvas = FigureCanvasQTAgg(fig)
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        interactive.attach(fig, self.canvas)
+        self.lay.addWidget(self.toolbar)
+        self.lay.addWidget(self.canvas, 1)
+        self.lay.addWidget(self.hint)
 
 
 class Table(QWidget):
@@ -260,8 +291,13 @@ class MainWindow(QMainWindow):
         act("Рассчитать", self.run_calc, "F5")
         act("Отчёт PDF…", lambda: self.export_report("pdf"))
         act("Отчёт XLSX…", lambda: self.export_report("xlsx"))
+        act("Отчёт DOCX…", lambda: self.export_report("docx"))
         menu.addSeparator()
         act("Выход", self.close, "Ctrl+Q", False)
+        sm = self.menuBar().addMenu("Настройки")
+        a = QAction("Цвета графиков…", self)
+        a.triggered.connect(self.edit_colors)
+        sm.addAction(a)
         hm = self.menuBar().addMenu("Справка")
         a = QAction("О программе", self)
         a.triggered.connect(self.about)
@@ -328,7 +364,8 @@ class MainWindow(QMainWindow):
         self.fc_chart_layout.addWidget(self.fc_msg)
         sp.addWidget(right)
         sp.setSizes([470, 800])
-        self.fc_canvas = None
+        self.fc_panel = ChartPanel()
+        self.fc_chart_layout.addWidget(self.fc_panel, 1)
         self._fc_timer = QTimer(self)
         self._fc_timer.setSingleShot(True)
         self._fc_timer.setInterval(600)
@@ -385,11 +422,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.fc_msg.setText(f"Предпросмотр недоступен: {e}")
             return
-        if self.fc_canvas is not None:
-            self.fc_chart_layout.removeWidget(self.fc_canvas)
-            self.fc_canvas.setParent(None)
-        self.fc_canvas = FigureCanvasQTAgg(fig)
-        self.fc_chart_layout.addWidget(self.fc_canvas, 1)
+        self.fc_panel.set_figure(fig)
 
     def _history_tab(self):
         sp = QSplitter()
@@ -400,8 +433,8 @@ class MainWindow(QMainWindow):
         self.hist_chart_layout.setContentsMargins(0, 0, 0, 0)
         sp.addWidget(right)
         sp.setSizes([560, 760])
-        self.hist_canvas = None
-        self.hist_toolbar = None
+        self.hist_panel = ChartPanel()
+        self.hist_chart_layout.addWidget(self.hist_panel)
         self._hist_timer = QTimer(self)
         self._hist_timer.setSingleShot(True)
         self._hist_timer.setInterval(500)
@@ -417,14 +450,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"История: {e}")
             return
         fig = charts.work_chart(rows)
-        for wdg in (self.hist_toolbar, self.hist_canvas):
-            if wdg is not None:
-                self.hist_chart_layout.removeWidget(wdg)
-                wdg.setParent(None)
-        self.hist_canvas = FigureCanvasQTAgg(fig)
-        self.hist_toolbar = NavigationToolbar2QT(self.hist_canvas, self)
-        self.hist_chart_layout.addWidget(self.hist_toolbar)
-        self.hist_chart_layout.addWidget(self.hist_canvas, 1)
+        self.hist_panel.set_figure(fig)
 
     def _survey_tab(self):
         sp = QSplitter()
@@ -435,8 +461,8 @@ class MainWindow(QMainWindow):
         self.survey_chart_layout.setContentsMargins(0, 0, 0, 0)
         sp.addWidget(right)
         sp.setSizes([360, 900])
-        self.survey_canvas = None
-        self.survey_toolbar = None
+        self.survey_panel = ChartPanel()
+        self.survey_chart_layout.addWidget(self.survey_panel)
         self._survey_timer = QTimer(self)
         self._survey_timer.setSingleShot(True)
         self._survey_timer.setInterval(500)
@@ -462,14 +488,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             funnel = 0.0
         fig = charts.survey_chart(rows, ports, funnel)
-        for wdg in (self.survey_toolbar, self.survey_canvas):
-            if wdg is not None:
-                self.survey_chart_layout.removeWidget(wdg)
-                wdg.setParent(None)
-        self.survey_canvas = FigureCanvasQTAgg(fig)
-        self.survey_toolbar = NavigationToolbar2QT(self.survey_canvas, self)
-        self.survey_chart_layout.addWidget(self.survey_toolbar)
-        self.survey_chart_layout.addWidget(self.survey_canvas, 1)
+        self.survey_panel.set_figure(fig)
 
     def _results_tab(self):
         w = QWidget()
@@ -482,13 +501,12 @@ class MainWindow(QMainWindow):
         self.chart_box = QComboBox()
         self.chart_box.currentIndexChanged.connect(self.show_chart)
         rl.addWidget(self.chart_box)
-        self.canvas_holder = QVBoxLayout()
-        rl.addLayout(self.canvas_holder, 1)
+        self.res_panel = ChartPanel()
+        rl.addWidget(self.res_panel, 1)
         sp.addWidget(right)
         sp.setSizes([480, 800])
         lay.addWidget(sp)
         self._charts = []
-        self.canvas = None
         return w
 
     # ------------------------------------------------------------ binding
@@ -654,7 +672,7 @@ class MainWindow(QMainWindow):
             return
         w = self.project.well
         default = f"ОПЗ_{w.well}_{w.pad}.{kind}".replace(" ", "_")
-        flt = "PDF (*.pdf)" if kind == "pdf" else "Excel (*.xlsx)"
+        flt = {"pdf": "PDF (*.pdf)", "xlsx": "Excel (*.xlsx)", "docx": "Word (*.docx)"}[kind]
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default, flt)
         if not path:
             return
@@ -666,6 +684,8 @@ class MainWindow(QMainWindow):
             try:
                 if kind == "pdf":
                     report_pdf.build_pdf(self.project, self.result, path)
+                elif kind == "docx":
+                    report_docx.build_docx(self.project, self.result, path)
                 else:
                     report_xlsx.build_xlsx(self.project, self.result, path)
             finally:
@@ -712,11 +732,29 @@ class MainWindow(QMainWindow):
     def show_chart(self, i):
         if not self._charts or i < 0:
             return
-        if self.canvas is not None:
-            self.canvas_holder.removeWidget(self.canvas)
-            self.canvas.setParent(None)
-        self.canvas = FigureCanvasQTAgg(self._charts[i][2])
-        self.canvas_holder.addWidget(self.canvas)
+        self.res_panel.set_figure(self._charts[i][2])
+
+    def edit_colors(self):
+        dlg = ColorDialog(self)
+        if dlg.exec():
+            data = settings.load()
+            data["colors"] = dlg.colors()
+            try:
+                settings.save(data)
+            except OSError as e:
+                QMessageBox.warning(self, rt.APP_NAME, f"Не удалось сохранить настройки: {e}")
+            charts.reset_palette()
+            charts.set_palette(dlg.colors())
+            self.redraw_charts()
+
+    def redraw_charts(self):
+        self.refresh_survey_chart()
+        self.refresh_history_chart()
+        self._fc_timer.start()
+        if self.result is not None:
+            i = self.chart_box.currentIndex()
+            self.show_results()
+            self.chart_box.setCurrentIndex(max(0, i))
 
     def about(self):
         box = QMessageBox(self)
@@ -731,7 +769,56 @@ class MainWindow(QMainWindow):
         box.exec()
 
 
+class ColorDialog(QDialog):
+    """Настройка цветов графиков. Применяется к интерфейсу и отчётам, хранится в профиле."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Цвета графиков")
+        self._colors = dict(charts.PALETTE)
+        self.buttons = {}
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Цвета применяются к графикам в программе и в отчётах PDF / DOCX / XLSX."))
+        form = QFormLayout()
+        for key, (label, _) in charts.PALETTE_SPEC.items():
+            b = QPushButton()
+            b.setFixedWidth(110)
+            b.clicked.connect(lambda _=False, k=key: self.pick(k))
+            self.buttons[key] = b
+            form.addRow(label + ":", b)
+        lay.addLayout(form)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel |
+                              QDialogButtonBox.StandardButton.RestoreDefaults)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        bb.button(QDialogButtonBox.StandardButton.RestoreDefaults).setText("По умолчанию")
+        bb.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(self.defaults)
+        lay.addWidget(bb)
+        self._paint()
+
+    def _paint(self):
+        for key, b in self.buttons.items():
+            col = QColor(self._colors[key])
+            text = "#FFFFFF" if col.lightness() < 128 else "#000000"
+            b.setText(col.name().upper())
+            b.setStyleSheet(f"background:{col.name()}; color:{text}; border:1px solid #888; padding:3px")
+
+    def pick(self, key):
+        col = QColorDialog.getColor(QColor(self._colors[key]), self, charts.PALETTE_SPEC[key][0])
+        if col.isValid():
+            self._colors[key] = col.name()
+            self._paint()
+
+    def defaults(self):
+        self._colors = {k: v[1] for k, v in charts.PALETTE_SPEC.items()}
+        self._paint()
+
+    def colors(self):
+        return dict(self._colors)
+
+
 def main(argv=None):
+    settings.apply_palette()
     app = QApplication(argv or sys.argv)
     app.setApplicationName(rt.APP_NAME)
     win = MainWindow()

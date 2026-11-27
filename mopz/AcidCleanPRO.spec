@@ -1,9 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Сборка: pyinstaller --noconfirm --clean AcidCleanPRO.spec
+from PyInstaller.utils.hooks import collect_data_files  # python-docx: шаблоны Word + структура пакета
+
 a = Analysis(
     ['main.py'],
     pathex=[],
-    datas=[('acidclean/assets', 'acidclean/assets')],
+    datas=[('acidclean/assets', 'acidclean/assets')] + collect_data_files('docx', include_py_files=True),
     hiddenimports=[],
     excludes=['tkinter', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.Qt3DCore',
               'PySide6.QtQuick', 'PySide6.QtQml', 'PySide6.QtMultimedia', 'pandas', 'scipy', 'IPython'],

@@ -12,13 +12,43 @@ from matplotlib.patches import Patch  # noqa: E402
 
 from .calc import CalcResult, interp, parse_date, survey_trajectory, treated  # noqa: E402
 
-RED = "#9B1B30"
-ACID = "#3BAA5C"
-FLUSH = "#5B7FD6"
-PROP = "#C9B88A"
 GREY = "#6B6B6B"
-OIL = "#7A4E1D"
-WATER = "#2C7FB8"
+
+# Настраиваемые цвета: ключ -> (подпись для пользователя, цвет по умолчанию)
+PALETTE_SPEC = {
+    "LIQ": ("Дебит жидкости (Qж)", "#2C7FB8"),
+    "OIL": ("Дебит нефти (Qн)", "#7A4E1D"),
+    "BHP": ("Забойное / пластовое давление (история, прогноз)", "#9B1B30"),
+    "WC": ("Обводнённость", "#6B6B6B"),
+    "KPROD": ("Коэффициент продуктивности", "#000000"),
+    "BH_INJ": ("Забойное давление закачки", "#000000"),
+    "WH_INJ": ("Устьевое давление закачки", "#000000"),
+    "FRAC_P": ("Давление ГРП", "#9B1B30"),
+    "RATE": ("Расход закачки", "#3BAA5C"),
+    "ACID": ("ГКС / промытая зона трещины", "#3BAA5C"),
+    "FLUSH": ("Продавка (тех. жидкость)", "#5B7FD6"),
+    "PROP": ("Закреплённая трещина (пропант)", "#C9B88A"),
+    "PORT": ("Муфта ГРП (обрабатывается)", "#9B1B30"),
+    "PORT_OFF": ("Муфта ГРП (не обрабатывается)", "#6B6B6B"),
+    "WELL": ("Ствол скважины", "#000000"),
+    "FUNNEL": ("Полированная воронка", "#2C7FB8"),
+    "ACCENT": ("Выделение (потеря продуктивности)", "#9B1B30"),
+}
+PALETTE = {k: v[1] for k, v in PALETTE_SPEC.items()}
+
+
+def set_palette(colors: dict) -> None:
+    """Применить пользовательские цвета (неизвестные ключи и пустые значения игнорируются)."""
+    PALETTE.update({k: v for k, v in (colors or {}).items() if k in PALETTE_SPEC and v})
+
+
+def reset_palette() -> None:
+    PALETTE.update({k: v[1] for k, v in PALETTE_SPEC.items()})
+
+
+def C(key: str) -> str:
+    return PALETTE[key]
+
 
 matplotlib.rcParams.update({
     "font.family": "DejaVu Sans",
@@ -49,8 +79,9 @@ def fracture_detail(res: CalcResult) -> Figure:
     xmax = max(r.port.xf for r in tr) if tr else 1
     for i, r in enumerate(tr):
         y = len(tr) - 1 - i
-        ax.barh(y, r.port.xf, color=PROP, edgecolor=GREY, height=0.55)
-        ax.barh(y, r.penetration, color=ACID, edgecolor=GREY, height=0.55)
+        ax.barh(y, r.port.xf, color=C("PROP"), edgecolor=GREY, height=0.55,
+                label="Закреплённая трещина (пропант)")
+        ax.barh(y, r.penetration, color=C("ACID"), edgecolor=GREY, height=0.55, label="Промыто ГКС")
         ax.text(r.penetration, y, f" {r.penetration:.1f} м", va="center", ha="left",
                 fontsize=8, color="black")
         ax.text(r.port.xf + xmax * 0.01, y, f"Xf {r.port.xf:.1f}", va="center", fontsize=8,
@@ -65,8 +96,8 @@ def fracture_detail(res: CalcResult) -> Figure:
     ax.grid(axis="y", visible=False)
     ax.set_xlabel("Расстояние от ствола скважины вдоль трещины (полудлина), м")
     ax.set_title("Прохождение ГКС по закреплённой трещине ГРП")
-    ax.legend(handles=[Patch(color=ACID, label="Промыто ГКС"),
-                       Patch(color=PROP, label="Закреплённая трещина (пропант)")],
+    ax.legend(handles=[Patch(color=C("ACID"), label="Промыто ГКС"),
+                       Patch(color=C("PROP"), label="Закреплённая трещина (пропант)")],
               loc="upper center", bbox_to_anchor=(0.5, -0.12 - 0.3 / max(1, len(tr))), ncol=2,
               fontsize=8, frameon=False)
     return fig
@@ -80,12 +111,14 @@ def fracture_plan(res: CalcResult) -> Figure:
     if not ports:
         return fig
     mds = [r.port.md for r in ports]
-    ax.plot([min(mds) - 60, max(mds) + 60], [0, 0], color="black", lw=2.5, label="Ствол (хвостовик)")
+    ax.plot([min(mds) - 60, max(mds) + 60], [0, 0], color=C("WELL"), lw=2.5, label="Ствол (хвостовик)")
     for r in ports:
         x = r.port.md
-        ax.plot([x, x], [-r.port.xf, r.port.xf], color=PROP, lw=7, solid_capstyle="butt")
+        ax.plot([x, x], [-r.port.xf, r.port.xf], color=C("PROP"), lw=7, solid_capstyle="butt",
+                label="Закреплённая трещина")
         if r.port.treat:
-            ax.plot([x, x], [-r.penetration, r.penetration], color=ACID, lw=7, solid_capstyle="butt")
+            ax.plot([x, x], [-r.penetration, r.penetration], color=C("ACID"), lw=7, solid_capstyle="butt",
+                    label="Промыто ГКС")
         ax.text(x, r.port.xf + 8, f"МГРП{r.port.number}", ha="center", fontsize=8)
         ax.text(x, -r.port.xf - 8, f"{x:.0f}", ha="center", va="top", fontsize=7, color=GREY)
     ymax = max(r.port.xf for r in ports)
@@ -96,9 +129,9 @@ def fracture_plan(res: CalcResult) -> Figure:
     ax.set_ylabel("Расстояние от ствола, м")
     ax.set_title("Схема трещин ГРП и зоны промывки ГКС (вид в плане)")
     ax.invert_xaxis()
-    ax.legend(handles=[Patch(color=ACID, label="Промыто ГКС"),
-                       Patch(color=PROP, label="Закреплённая трещина"),
-                       Patch(color="black", label="Ствол (хвостовик)")],
+    ax.legend(handles=[Patch(color=C("ACID"), label="Промыто ГКС"),
+                       Patch(color=C("PROP"), label="Закреплённая трещина"),
+                       Patch(color=C("WELL"), label="Ствол (хвостовик)")],
               loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=3, fontsize=8, frameon=False)
     return fig
 
@@ -113,11 +146,11 @@ def history_chart(res: CalcResult) -> Figure:
         ax1.text(0.5, 0.5, "История эксплуатации не загружена", ha="center", transform=ax1.transAxes)
         return fig
     d = [p.date for p in pts]
-    ax1.plot(d, [p.q_liq for p in pts], "-o", ms=3, color=WATER, label="Qж, т/сут")
-    ax1.plot(d, [p.q_oil for p in pts], "-o", ms=3, color=OIL, label="Qн, т/сут")
+    ax1.plot(d, [p.q_liq for p in pts], "-o", ms=3, color=C("LIQ"), label="Qж, т/сут")
+    ax1.plot(d, [p.q_oil for p in pts], "-o", ms=3, color=C("OIL"), label="Qн, т/сут")
     ax1.set_ylabel("Дебит, т/сут")
     ax2 = ax1.twinx()
-    ax2.plot(d, [p.water_cut for p in pts], "--", color=GREY, label="Обв., %")
+    ax2.plot(d, [p.water_cut for p in pts], "--", color=C("WC"), label="Обв., %")
     ax2.set_ylabel("Обводнённость, %")
     ax2.set_ylim(0, 100)
     ax2.grid(False)
@@ -126,22 +159,22 @@ def history_chart(res: CalcResult) -> Figure:
     ax1.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=8)
     ax1.set_title("Диаграмма работы скважины (входной контроль)")
 
-    ax3.plot(d, [p.p_bhp for p in pts], "-s", ms=3, color=RED, label="Рзаб, атм")
+    ax3.plot(d, [p.p_bhp for p in pts], "-s", ms=3, color=C("BHP"), label="Рзаб, атм")
     if any(p.p_res for p in pts):
-        ax3.plot(d, [p.p_res for p in pts], ":", color=RED, alpha=0.6, label="Рпл, атм")
+        ax3.plot(d, [p.p_res for p in pts], ":", color=C("BHP"), alpha=0.6, label="Рпл, атм")
     ax3.set_ylabel("Давление, атм")
     ax4 = ax3.twinx()
-    ax4.plot(d, [p.kprod for p in pts], "-^", ms=3, color="black", label="Кпрод, м3/сут/атм")
+    ax4.plot(d, [p.kprod for p in pts], "-^", ms=3, color=C("KPROD"), label="Кпрод, м3/сут/атм")
     ax4.set_ylabel("Кпрод, м3/сут/атм")
     ax4.grid(False)
     loss = res.loss
     if loss.loss_pct is not None:
-        ax4.axhline(loss.k_initial, color="black", lw=0.8, ls="--")
+        ax4.axhline(loss.k_initial, color=C("KPROD"), lw=0.8, ls="--")
         ax4.text(d[0], loss.k_initial, f"  Кпрод нач. {loss.k_initial:.2f}", va="bottom", fontsize=8)
         ax3.text(0.5, 0.92, f"Кпрод: {loss.k_initial:.2f} → {loss.k_current:.2f} м3/сут/атм, "
                  f"потеря продуктивности {loss.loss_pct:.0f} %", transform=ax3.transAxes,
-                 ha="center", va="top", fontsize=9, color=RED, weight="bold",
-                 bbox=dict(facecolor="white", edgecolor=RED, alpha=0.9))
+                 ha="center", va="top", fontsize=9, color=C("ACCENT"), weight="bold",
+                 bbox=dict(facecolor="white", edgecolor=C("ACCENT"), alpha=0.9))
         ks = [p.kprod for p in pts if p.kprod]
         if max(ks) > 4 * loss.k_initial:
             ax4.set_ylim(0, loss.k_initial * 1.6)
@@ -160,10 +193,10 @@ def forecast_chart(res: CalcResult) -> Figure:
     ql = [prod.q_liq_before] + [r.q_liq for r in fc.rows]
     qo = [prod.q_oil_before] + [r.q_oil for r in fc.rows]
     qb = [prod.q_oil_before] + [r.q_oil_base for r in fc.rows]
-    ax.plot(m, ql, "-o", ms=4, color=WATER, label="Qж, м3/сут")
-    ax.plot(m, qo, "-o", ms=4, color=OIL, label="Qн, т/сут")
-    ax.plot(m, qb, ":", color=OIL, alpha=0.7, label="Qн без ОПЗ, т/сут")
-    ax.fill_between(m[1:], qb[1:], qo[1:], color=OIL, alpha=0.12)
+    ax.plot(m, ql, "-o", ms=4, color=C("LIQ"), label="Qж, м3/сут")
+    ax.plot(m, qo, "-o", ms=4, color=C("OIL"), label="Qн, т/сут")
+    ax.plot(m, qb, ":", color=C("OIL"), alpha=0.7, label="Qн без ОПЗ, т/сут")
+    ax.fill_between(m[1:], qb[1:], qo[1:], color=C("OIL"), alpha=0.12)
     ax.set_xlabel("Месяц после ОПЗ (0 — до ОПЗ)")
     ax.set_ylabel("Дебит")
     ax.set_ylim(bottom=0)
@@ -171,8 +204,8 @@ def forecast_chart(res: CalcResult) -> Figure:
     ax2 = ax.twinx()
     wc = [prod.water_cut] + [r.water_cut for r in fc.rows]
     pb = [prod.p_bhp] + [r.p_bhp for r in fc.rows]
-    ax2.plot(m, wc, "--", color=GREY, label="Обв., %")
-    ax2.plot(m, pb, "-", color=RED, label="Рзаб, атм")
+    ax2.plot(m, wc, "--", color=C("WC"), label="Обв., %")
+    ax2.plot(m, pb, "-", color=C("BHP"), label="Рзаб, атм")
     ax2.set_ylabel("Обводнённость, % / Рзаб, атм")
     ax2.set_ylim(0, max(100, max(pb) * 1.3))
     ax2.grid(False)
@@ -191,9 +224,9 @@ def _shade(ax, pts):
     cur = pts[0].fluid
     for a, b in zip(pts[:-1], pts[1:]):
         if b.fluid != cur:
-            ax.axvspan(start, a.t, color=ACID if cur == "ГКС" else FLUSH, alpha=0.18, lw=0)
+            ax.axvspan(start, a.t, color=C("ACID") if cur == "ГКС" else C("FLUSH"), alpha=0.18, lw=0)
             start, cur = a.t, b.fluid
-    ax.axvspan(start, pts[-1].t, color=ACID if cur == "ГКС" else FLUSH, alpha=0.18, lw=0)
+    ax.axvspan(start, pts[-1].t, color=C("ACID") if cur == "ГКС" else C("FLUSH"), alpha=0.18, lw=0)
 
 
 def pumping_chart(res: CalcResult, frac_pressure: float, stage=None) -> Figure:
@@ -212,15 +245,15 @@ def pumping_chart(res: CalcResult, frac_pressure: float, stage=None) -> Figure:
     t = [p.t - t0 for p in pts]
     pumping = [p for p in pts if p.fluid != "—"]
     _shade(ax, [replace(p, t=p.t - t0) for p in pumping])
-    ax.plot(t, [p.p_bh for p in pts], "--", color="black", label="Забойное давление")
-    ax.plot(t, [p.p_wh for p in pts], "-.", color="black", label="Устьевое давление")
+    ax.plot(t, [p.p_bh for p in pts], "--", color=C("BH_INJ"), label="Забойное давление")
+    ax.plot(t, [p.p_wh for p in pts], "-.", color=C("WH_INJ"), label="Устьевое давление")
     if frac_pressure > 0:
-        ax.axhline(frac_pressure, color=RED, lw=1.2, label="Давление ГРП")
+        ax.axhline(frac_pressure, color=C("FRAC_P"), lw=1.2, label="Давление ГРП")
     ax.set_ylim(0, max(frac_pressure, max(p.p_bh for p in pts)) * 1.25)
     ax.set_ylabel("Давление, атм")
     ax.set_xlabel("Время, мин")
     ax2 = ax.twinx()
-    ax2.step(t, [p.rate for p in pts], where="post", color=ACID, lw=1.5, label="Расход")
+    ax2.step(t, [p.rate for p in pts], where="post", color=C("RATE"), lw=1.5, label="Расход")
     ax2.set_ylim(0, max(p.rate for p in pts) * 2 + 0.01)
     ax2.set_ylabel("Расход, м3/мин")
     ax2.grid(False)
@@ -230,8 +263,8 @@ def pumping_chart(res: CalcResult, frac_pressure: float, stage=None) -> Figure:
                     va="top", fontsize=7)
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    extra = [Patch(color=ACID, alpha=0.3, label="В пласт поступает ГКС"),
-             Patch(color=FLUSH, alpha=0.3, label="В пласт поступает тех. жидкость")]
+    extra = [Patch(color=C("ACID"), alpha=0.3, label="В пласт поступает ГКС"),
+             Patch(color=C("FLUSH"), alpha=0.3, label="В пласт поступает тех. жидкость")]
     ax.legend(h1 + h2 + extra, l1 + l2 + [e.get_label() for e in extra], loc="lower right",
               fontsize=7, ncol=2)
     ax.set_title(title)
@@ -251,9 +284,9 @@ def skin_chart(res: CalcResult) -> Figure:
         s.append(r.skin_after)
         ax.plot(v, s, label=f"Ст.{i} МГРП{r.port.number}: {s0:+.1f} → {r.skin_after:+.1f}")
     vmax = max((r.acid_volume for r in res.ports if r.port.treat), default=0)
-    ax.axvspan(0, vmax, color=ACID, alpha=0.12)
+    ax.axvspan(0, vmax, color=C("ACID"), alpha=0.12)
     ax.axvspan(vmax, vmax + max((r.flush_volume for r in res.ports if r.port.treat), default=0),
-               color=FLUSH, alpha=0.12)
+               color=C("FLUSH"), alpha=0.12)
     ax.set_xlabel("Объём закачки в пласт, м3")
     ax.set_ylabel("Скин-фактор")
     ax.set_title("Изменение скин-фактора по зонам обработки")
@@ -276,26 +309,26 @@ def work_chart(history, w=8.0, h=5.5) -> Figure:
     def col(attr):
         return [getattr(r, attr) if getattr(r, attr) is not None else float("nan") for _, r in rows]
 
-    l1 = ax.plot(d, col("q_liq"), "-o", ms=3, color=WATER, label="Qж, т/сут")
-    l2 = ax.plot(d, col("q_oil"), "-o", ms=3, color=OIL, label="Qн, т/сут")
+    l1 = ax.plot(d, col("q_liq"), "-o", ms=3, color=C("LIQ"), label="Qж, т/сут")
+    l2 = ax.plot(d, col("q_oil"), "-o", ms=3, color=C("OIL"), label="Qн, т/сут")
     ax.set_ylabel("Дебит, т/сут")
     ax.set_ylim(bottom=0)
     ax_p = ax.twinx()
-    l3 = ax_p.plot(d, col("p_bhp"), "-s", ms=3, color=RED, label="Рзаб, атм")
+    l3 = ax_p.plot(d, col("p_bhp"), "-s", ms=3, color=C("BHP"), label="Рзаб, атм")
     pr = col("p_res")
     l5 = []
     if any(v == v for v in pr):
-        l5 = ax_p.plot(d, pr, ":", color=RED, alpha=0.6, label="Рпл, атм")
-    ax_p.set_ylabel("Рзаб, атм", color=RED)
-    ax_p.tick_params(axis="y", colors=RED)
+        l5 = ax_p.plot(d, pr, ":", color=C("BHP"), alpha=0.6, label="Рпл, атм")
+    ax_p.set_ylabel("Рзаб, атм", color=C("BHP"))
+    ax_p.tick_params(axis="y", colors=C("BHP"))
     ax_p.set_ylim(bottom=0)
     ax_p.grid(False)
     ax_w = ax.twinx()
     ax_w.spines["right"].set_position(("axes", 1.12))
     ax_w.spines["right"].set_visible(True)
-    l4 = ax_w.plot(d, col("water_cut"), "--", color=GREY, label="Обв., %")
-    ax_w.set_ylabel("Обводнённость, %", color=GREY)
-    ax_w.tick_params(axis="y", colors=GREY)
+    l4 = ax_w.plot(d, col("water_cut"), "--", color=C("WC"), label="Обв., %")
+    ax_w.set_ylabel("Обводнённость, %", color=C("WC"))
+    ax_w.tick_params(axis="y", colors=C("WC"))
     ax_w.set_ylim(0, 100)
     ax_w.grid(False)
     lines = l1 + l2 + l3 + l5 + l4
@@ -327,14 +360,14 @@ def survey_chart(survey, ports=(), funnel_md: float = 0.0, w=8.0, h=7.5) -> Figu
         return interp(md, t.md, ys)
 
     # вертикальный профиль
-    ax_vs.plot(vs, t.tvd, color="black", lw=1.6)
+    ax_vs.plot(vs, t.tvd, color=C("WELL"), lw=1.6, label="Ствол")
     ax_vs.invert_yaxis()
     ax_vs.set_xlabel(f"Смещение по азимуту {az:.0f}°, м")
     ax_vs.set_ylabel("TVD, м")
     ax_vs.set_title("Вертикальный профиль")
     # план
-    ax_pl.plot(t.east, t.north, color="black", lw=1.6)
-    ax_pl.plot([0], [0], "o", color=GREY, ms=5)
+    ax_pl.plot(t.east, t.north, color=C("WELL"), lw=1.6, label="Ствол")
+    ax_pl.plot([0], [0], "o", color=GREY, ms=5, label="Устье")
     ax_pl.set_aspect("equal", adjustable="datalim")
     ax_pl.set_xlabel("Восток, м")
     ax_pl.set_ylabel("Север, м")
@@ -342,32 +375,32 @@ def survey_chart(survey, ports=(), funnel_md: float = 0.0, w=8.0, h=7.5) -> Figu
     # горизонтальный участок
     start = min([p.md for p in ports] + [t.md[-1]]) - 250 if ports else t.md[-1] - 1200
     i0 = max(0, next((i for i, m in enumerate(t.md) if m >= start), 0) - 1)
-    ax_hz.plot(t.md[i0:], t.tvd[i0:], color="black", lw=1.6, label="Ствол")
+    ax_hz.plot(t.md[i0:], t.tvd[i0:], color=C("WELL"), lw=1.6, label="Ствол")
     ax_hz.invert_yaxis()
     ax_hz.set_xlabel("MD, м")
     ax_hz.set_ylabel("TVD, м")
     ax_hz.set_title("Горизонтальный участок (масштаб по TVD увеличен)")
     for p in ports:
-        col = RED if p.treat else GREY
+        col = C("PORT") if p.treat else C("PORT_OFF")
         x_vs, y = at(p.md, vs), at(p.md, t.tvd)
-        ax_vs.plot(x_vs, y, "v", color=col, ms=6)
-        ax_pl.plot(at(p.md, t.east), at(p.md, t.north), "v", color=col, ms=6)
-        ax_hz.plot(p.md, y, "v", color=col, ms=8)
+        ax_vs.plot(x_vs, y, "v", color=col, ms=6, label=f"МГРП{p.number}")
+        ax_pl.plot(at(p.md, t.east), at(p.md, t.north), "v", color=col, ms=6, label=f"МГРП{p.number}")
+        ax_hz.plot(p.md, y, "v", color=col, ms=8, label=f"МГРП{p.number}")
         ax_hz.annotate(f"МГРП{p.number}\n{p.md:.0f}", (p.md, y), textcoords="offset points",
                        xytext=(0, 9), ha="center", fontsize=7, color=col)
     if funnel_md and t.md[0] <= funnel_md <= t.md[-1]:
         y = at(funnel_md, t.tvd)
-        ax_hz.axvline(funnel_md, color=WATER, ls="--", lw=1)
+        ax_hz.axvline(funnel_md, color=C("FUNNEL"), ls="--", lw=1)
         ax_hz.annotate(f"Воронка {funnel_md:.0f}", (funnel_md, y), textcoords="offset points",
-                       xytext=(4, -14), fontsize=7, color=WATER)
-        ax_vs.plot(at(funnel_md, vs), y, "s", color=WATER, ms=5)
+                       xytext=(4, -14), fontsize=7, color=C("FUNNEL"))
+        ax_vs.plot(at(funnel_md, vs), y, "s", color=C("FUNNEL"), ms=5, label="Полированная воронка")
     lo, hi = ax_hz.get_ylim()
     pad = max(2.0, abs(lo - hi) * 0.25)
     ax_hz.set_ylim(lo + pad, hi - pad)
-    handles = [Patch(color=RED, label="Муфта ГРП (обрабатывается)"),
-               Patch(color=GREY, label="Муфта ГРП (не обрабатывается)")]
+    handles = [Patch(color=C("PORT"), label="Муфта ГРП (обрабатывается)"),
+               Patch(color=C("PORT_OFF"), label="Муфта ГРП (не обрабатывается)")]
     if funnel_md:
-        handles.append(Patch(color=WATER, label="Полированная воронка"))
+        handles.append(Patch(color=C("FUNNEL"), label="Полированная воронка"))
     ax_hz.legend(handles=handles, loc="lower left", fontsize=7, ncol=3)
     fig.suptitle(f"Геометрия ствола: забой MD {t.md[-1]:.0f} м, TVD {t.tvd[-1]:.1f} м, "
                  f"смещение {vs[-1]:.0f} м", fontsize=10)

@@ -2,7 +2,7 @@
 
     AcidCleanPRO                         — интерфейс
     AcidCleanPRO проект.acp              — интерфейс с открытым проектом
-    AcidCleanPRO проект.acp --pdf r.pdf --xlsx r.xlsx
+    AcidCleanPRO проект.acp --pdf r.pdf --xlsx r.xlsx --docx r.docx
                                          — расчёт и отчёты без интерфейса
     AcidCleanPRO шаблон.xlsx --pdf r.pdf — то же из заполненного шаблона Excel
 """
@@ -11,8 +11,10 @@ import sys
 
 
 def batch(args) -> int:
-    from acidclean import calc, io_excel, report_pdf, report_xlsx
+    from acidclean import calc, io_excel, report_docx, report_pdf, report_xlsx, settings
     from acidclean.models import Project
+
+    settings.apply_palette()
 
     if args.project.lower().endswith((".xlsx", ".xlsm")):
         project = io_excel.import_template(args.project)
@@ -23,6 +25,8 @@ def batch(args) -> int:
         report_pdf.build_pdf(project, res, args.pdf)
     if args.xlsx:
         report_xlsx.build_xlsx(project, res, args.xlsx)
+    if args.docx:
+        report_docx.build_docx(project, res, args.docx)
     for w in res.warnings:
         print("Внимание:", w)
     return 0
@@ -33,8 +37,9 @@ if __name__ == "__main__":
     ap.add_argument("project", nargs="?", help="проект .acp или шаблон .xlsx")
     ap.add_argument("--pdf", help="сохранить PDF-отчёт без запуска интерфейса")
     ap.add_argument("--xlsx", help="сохранить XLSX-отчёт без запуска интерфейса")
+    ap.add_argument("--docx", help="сохранить DOCX-отчёт (Word) без запуска интерфейса")
     a, _ = ap.parse_known_args()
-    if a.project and (a.pdf or a.xlsx):
+    if a.project and (a.pdf or a.xlsx or a.docx):
         sys.exit(batch(a))
     from acidclean.gui import main
     sys.exit(main())

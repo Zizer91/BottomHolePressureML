@@ -182,6 +182,9 @@ def build_pdf(project: Project, res: CalcResult, path: str) -> None:
     s.append(tcap("Параметры закреплённых трещин ГРП и объёмы ГКС по портам"))
     s.append(_table(head, rows, st, [frame_w * 0.34, frame_w * 0.08] + [frame_w * 0.58 / max(n, 1)] * n))
     s.append(Spacer(1, 4 * mm))
+    if project.survey:
+        s.append(figure(charts.survey_chart(project.survey, project.ports, project.construction.funnel_md),
+                        "Геометрия ствола скважины по данным инклинометрии"))
     s.append(figure(charts.history_chart(res),
                     "Диаграмма работы скважины с указанием потери продуктивности (входной контроль)"))
 
